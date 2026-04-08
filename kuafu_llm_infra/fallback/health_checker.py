@@ -1,8 +1,8 @@
 """
-Background health checker and speed prober (combined).
+Background health checker and speed prober.
 
-Periodically sends minimal requests to each provider to
-determine health status and measure TTFT. Results are written
+Periodically sends minimal requests to each (model, provider) pair
+to determine health status and measure TTFT. Results are written
 to the state backend and exposed via metrics.
 """
 
@@ -13,95 +13,122 @@ import logging
 import time
 from typing import Dict, List, Optional
 
-from ..config.schema import ProviderConfig, HealthCheckConfig
+from ..config.schema import LLMStabilityConfig
 from ..providers.base import BaseProvider
 from ..state.backend import StateBackend, ProbeResult
 from ..metrics.collector import MetricsCollector, NoopCollector
+from ..metrics import registry as m
+from ..alert.dispatcher import AlertDispatcher
+from ..alert.channels.base import AlertEvent
 
 logger = logging.getLogger("kuafu_llm_infra.health_checker")
 
 
 class HealthChecker:
-    """Combined health checker and speed prober."""
+    """Background health checker — probes per (model, provider)."""
 
     def __init__(
         self,
-        config: HealthCheckConfig,
-        providers: Dict[str, ProviderConfig],
+        config: LLMStabilityConfig,
         adapters: Dict[str, BaseProvider],
         state: StateBackend,
         metrics: Optional[MetricsCollector] = None,
-        alert_queue: Optional[asyncio.Queue] = None,
+        alert_dispatcher: Optional[AlertDispatcher] = None,
     ) -> None:
         self._config = config
-        self._providers = providers
         self._adapters = adapters
         self._state = state
         self._metrics = metrics or NoopCollector()
-        self._alert_queue = alert_queue
+        self._alert_dispatcher = alert_dispatcher
         self._task: Optional[asyncio.Task] = None
 
     def start(self) -> None:
-        """Start the periodic probe loop."""
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._probe_loop())
             logger.info("Health checker started")
 
     def stop(self) -> None:
-        """Stop the periodic probe loop."""
         if self._task and not self._task.done():
             self._task.cancel()
             logger.info("Health checker stopped")
 
+    def update_config(
+        self,
+        config: LLMStabilityConfig,
+        adapters: Dict[str, BaseProvider],
+    ) -> None:
+        """Apply new configuration (called by gateway on hot-reload)."""
+        self._config = config
+        self._adapters = adapters
+
+    def _collect_probe_targets(self) -> List[tuple]:
+        """
+        Collect all (canonical_model, provider_name, actual_model_id) tuples
+        that need probing from the models config.
+        """
+        targets = []
+        for canonical_model, model_cfg in self._config.models.items():
+            for entry in model_cfg.providers:
+                if not entry.probe:
+                    continue
+                provider_cfg = self._config.providers.get(entry.provider)
+                if not provider_cfg or not provider_cfg.enabled:
+                    continue
+                if entry.provider not in self._adapters:
+                    continue
+                actual_model_id = entry.model_id or canonical_model
+                targets.append((canonical_model, entry.provider, actual_model_id))
+        return targets
+
     async def _probe_loop(self) -> None:
-        """Main loop: probe each provider in staggered sequence."""
+        """Main loop: probe each (model, provider) in staggered sequence."""
+        hc = self._config.health_check
         while True:
             try:
-                for name, provider_cfg in self._providers.items():
-                    if not provider_cfg.enabled:
-                        continue
-                    if name not in self._adapters:
-                        continue
-
-                    # Probe coordination: try to acquire lock
+                targets = self._collect_probe_targets()
+                for canonical_model, provider_name, actual_model_id in targets:
                     acquired = await self._state.try_acquire_probe_lock(
-                        name, self._config.interval
+                        canonical_model, provider_name, hc.interval,
                     )
                     if not acquired:
-                        logger.debug(f"Probe lock not acquired for {name}, skipping")
+                        logger.debug(
+                            f"Probe lock not acquired for ({canonical_model}, {provider_name})"
+                        )
                         continue
 
-                    asyncio.create_task(self._probe_one(name, provider_cfg))
-
-                    # Stagger probes
-                    await asyncio.sleep(self._config.stagger_interval)
+                    asyncio.create_task(
+                        self._probe_one(canonical_model, provider_name, actual_model_id)
+                    )
+                    await asyncio.sleep(hc.stagger_interval)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Probe loop error: {e}", exc_info=True)
 
-            await asyncio.sleep(self._config.interval)
+            await asyncio.sleep(hc.interval)
 
-    async def _probe_one(self, name: str, provider_cfg: ProviderConfig) -> None:
-        """Probe a single provider: health + TTFT measurement."""
-        adapter = self._adapters.get(name)
+    async def _probe_one(
+        self,
+        canonical_model: str,
+        provider_name: str,
+        actual_model_id: str,
+    ) -> None:
+        """Probe a single (model, provider) pair."""
+        adapter = self._adapters.get(provider_name)
         if not adapter:
             return
 
-        ping_model = provider_cfg.ping_model
-        if not ping_model:
-            return
-
+        hc = self._config.health_check
         start = time.monotonic()
         first_token_time: Optional[float] = None
         has_content = False
 
         try:
             async for chunk in adapter.probe(
-                model=ping_model,
-                max_tokens=self._config.probe_max_tokens,
-                timeout=self._config.timeout,
+                model=actual_model_id,
+                max_tokens=hc.probe_max_tokens,
+                timeout=hc.timeout,
             ):
                 if first_token_time is None:
                     first_token_time = time.monotonic()
@@ -111,48 +138,54 @@ class HealthChecker:
             ttft_ms = ((first_token_time - start) * 1000) if first_token_time else 0.0
 
             result = ProbeResult(
-                provider=name,
+                provider=provider_name,
+                model=canonical_model,
                 health=True,
                 ttft_ms=ttft_ms,
                 valid_response=has_content,
                 timestamp=time.time(),
             )
 
-            # Update state and metrics
-            await self._state.set_probe_result(name, result)
-            card = await self._state.get_score_card(ping_model, name)
+            await self._state.set_probe_result(canonical_model, provider_name, result)
+            card = await self._state.get_score_card(canonical_model, provider_name)
             card.update_probe(result)
-            await self._state.update_score_card(ping_model, name, card)
+            await self._state.update_score_card(canonical_model, provider_name, card)
 
-            self._metrics.set_provider_health(name, True)
-            self._metrics.observe_probe_ttft(name, ttft_ms / 1000.0)
-            self._metrics.inc_probe_total(name, "success")
+            self._metrics.set(m.PROVIDER_HEALTH, 1.0, provider=provider_name)
+            self._metrics.observe(m.PROBE_TTFT, ttft_ms / 1000.0, provider=provider_name)
+            self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="success")
 
-            logger.debug(f"Probe {name}: healthy, ttft={ttft_ms:.0f}ms")
+            logger.debug(
+                f"Probe ({canonical_model}, {provider_name}): "
+                f"healthy, ttft={ttft_ms:.0f}ms"
+            )
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
             result = ProbeResult(
-                provider=name,
+                provider=provider_name,
+                model=canonical_model,
                 health=False,
                 timestamp=time.time(),
             )
-            await self._state.set_probe_result(name, result)
-            card = await self._state.get_score_card(ping_model, name)
+            await self._state.set_probe_result(canonical_model, provider_name, result)
+            card = await self._state.get_score_card(canonical_model, provider_name)
             card.update_probe(result)
-            await self._state.update_score_card(ping_model, name, card)
+            await self._state.update_score_card(canonical_model, provider_name, card)
 
-            self._metrics.set_provider_health(name, False)
-            self._metrics.inc_probe_total(name, "error")
+            self._metrics.set(m.PROVIDER_HEALTH, 0.0, provider=provider_name)
+            self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="error")
 
-            logger.warning(f"Probe {name}: failed - {e}")
+            logger.warning(
+                f"Probe ({canonical_model}, {provider_name}): failed - {e}"
+            )
 
-            if self._alert_queue:
-                from ..alert.channels.base import AlertEvent
-                self._alert_queue.put_nowait(AlertEvent(
+            if self._alert_dispatcher:
+                self._alert_dispatcher.dispatch(AlertEvent(
                     level="warning",
                     title="probe_failed",
-                    message=f"Provider {name} probe failed: {e}",
-                    provider=name,
+                    message=f"Probe failed for {canonical_model} @ {provider_name}: {e}",
+                    provider=provider_name,
+                    model=canonical_model,
                 ))

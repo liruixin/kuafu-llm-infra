@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .base import BaseStrategy, StrategyEvent, StrategyAction
+from .registry import register_strategy
 
 
 class TotalTimeoutStrategy(BaseStrategy):
@@ -57,3 +58,8 @@ class TotalTimeoutStrategy(BaseStrategy):
                 detail={"elapsed": elapsed},
             )
         return None
+
+
+@register_strategy
+def create_total_timeout(cfg, provider: str, model: str):
+    return TotalTimeoutStrategy(cfg.timeout.total, provider, model)

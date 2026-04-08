@@ -2,7 +2,7 @@
 State backend abstraction.
 
 Defines the interface for score card storage, probe coordination,
-and request metrics aggregation. Two implementations are provided:
+request metrics aggregation, and config broadcast. Two implementations:
 
 - ``MemoryBackend``: in-process, zero dependencies (default)
 - ``RedisBackend``: multi-instance shared state (optional)
@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Callable
 
 
 # ============================================================================
@@ -35,6 +35,7 @@ class RequestOutcome:
 class ProbeResult:
     """Result of a background health/speed probe."""
     provider: str
+    model: str = ""
     health: bool = True
     ttft_ms: float = 0.0
     valid_response: bool = True
@@ -55,7 +56,7 @@ class SlidingWindowEntry:
 @dataclass
 class ScoreCard:
     """
-    Per-provider-per-model scoring state.
+    Per-(model, provider) scoring state.
 
     Combines data from actual requests (sliding window) and
     background probes to produce a composite score.
@@ -156,17 +157,17 @@ class StateBackend(ABC):
     async def update_score_card(self, model: str, provider: str, card: ScoreCard) -> None:
         ...
 
-    # --- Probe coordination ---
+    # --- Probe coordination (per model+provider) ---
     @abstractmethod
-    async def try_acquire_probe_lock(self, provider: str, ttl: float) -> bool:
+    async def try_acquire_probe_lock(self, model: str, provider: str, ttl: float) -> bool:
         ...
 
     @abstractmethod
-    async def set_probe_result(self, provider: str, result: ProbeResult) -> None:
+    async def set_probe_result(self, model: str, provider: str, result: ProbeResult) -> None:
         ...
 
     @abstractmethod
-    async def get_probe_result(self, provider: str) -> Optional[ProbeResult]:
+    async def get_probe_result(self, model: str, provider: str) -> Optional[ProbeResult]:
         ...
 
     # --- Request metrics aggregation ---
@@ -177,3 +178,16 @@ class StateBackend(ABC):
     @abstractmethod
     async def get_aggregated_stats(self, model: str, provider: str) -> AggregatedStats:
         ...
+
+    # --- Config broadcast (no-op for memory backend) ---
+    async def publish_config(self, config_json: str) -> None:
+        """Publish config update to other instances. No-op for memory backend."""
+        pass
+
+    async def subscribe_config(self, callback: Callable[[str], None]) -> None:
+        """Subscribe to config updates from other instances. No-op for memory backend."""
+        pass
+
+    async def unsubscribe_config(self) -> None:
+        """Stop config subscription. No-op for memory backend."""
+        pass

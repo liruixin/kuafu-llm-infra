@@ -2,18 +2,20 @@
 Redis state backend for multi-instance deployments.
 
 Provides shared score cards, probe coordination (distributed locks),
-and aggregated request metrics across multiple service instances.
+aggregated request metrics, and config broadcast (pub/sub) across
+multiple service instances.
 
 Requires: ``pip install redis``
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Callable, Optional
 
 from .backend import (
     StateBackend,
@@ -25,6 +27,8 @@ from .backend import (
 )
 
 logger = logging.getLogger("kuafu_llm_infra.state.redis")
+
+_CONFIG_CHANNEL = "config_update"
 
 
 class RedisBackend(StateBackend):
@@ -46,6 +50,8 @@ class RedisBackend(StateBackend):
         self._redis = aioredis.from_url(url, decode_responses=True)
         self._prefix = key_prefix
         self._instance_id = str(uuid.uuid4())[:8]
+        self._pubsub = None
+        self._sub_task: Optional[asyncio.Task] = None
 
     def _key(self, *parts: str) -> str:
         return self._prefix + ":".join(parts)
@@ -63,19 +69,20 @@ class RedisBackend(StateBackend):
         key = self._key("scorecard", model, provider)
         await self._redis.set(key, self._serialize_score_card(card), ex=600)
 
-    # --- Probe coordination ---
+    # --- Probe coordination (per model+provider) ---
 
-    async def try_acquire_probe_lock(self, provider: str, ttl: float) -> bool:
-        key = self._key("probe_lock", provider)
+    async def try_acquire_probe_lock(self, model: str, provider: str, ttl: float) -> bool:
+        key = self._key("probe_lock", model, provider)
         result = await self._redis.set(
             key, self._instance_id, nx=True, ex=int(ttl),
         )
         return result is not None
 
-    async def set_probe_result(self, provider: str, result: ProbeResult) -> None:
-        key = self._key("probe", provider)
+    async def set_probe_result(self, model: str, provider: str, result: ProbeResult) -> None:
+        key = self._key("probe", model, provider)
         data = json.dumps({
             "provider": result.provider,
+            "model": result.model,
             "health": result.health,
             "ttft_ms": result.ttft_ms,
             "valid_response": result.valid_response,
@@ -83,8 +90,8 @@ class RedisBackend(StateBackend):
         })
         await self._redis.set(key, data, ex=120)
 
-    async def get_probe_result(self, provider: str) -> Optional[ProbeResult]:
-        key = self._key("probe", provider)
+    async def get_probe_result(self, model: str, provider: str) -> Optional[ProbeResult]:
+        key = self._key("probe", model, provider)
         raw = await self._redis.get(key)
         if not raw:
             return None
@@ -104,7 +111,6 @@ class RedisBackend(StateBackend):
         pipe.expire(stats_key, 300)
         await pipe.execute()
 
-        # Also update score card
         card = await self.get_score_card(model, provider)
         card.push_request(outcome)
         await self.update_score_card(model, provider, card)
@@ -119,6 +125,61 @@ class RedisBackend(StateBackend):
             success=int(data.get("success", 0)),
             failure=int(data.get("failure", 0)),
         )
+
+    # --- Config broadcast via pub/sub ---
+
+    async def publish_config(self, config_json: str) -> None:
+        """Publish config update to all instances."""
+        channel = self._key(_CONFIG_CHANNEL)
+        payload = json.dumps({
+            "source": self._instance_id,
+            "config": config_json,
+            "timestamp": time.time(),
+        })
+        await self._redis.publish(channel, payload)
+        logger.info(f"Config published to Redis channel by instance {self._instance_id}")
+
+    async def subscribe_config(self, callback: Callable[[str], None]) -> None:
+        """Subscribe to config updates from other instances."""
+        import redis.asyncio as aioredis
+
+        channel = self._key(_CONFIG_CHANNEL)
+        self._pubsub = self._redis.pubsub()
+        await self._pubsub.subscribe(channel)
+
+        async def _listener():
+            try:
+                async for message in self._pubsub.listen():
+                    if message["type"] != "message":
+                        continue
+                    try:
+                        payload = json.loads(message["data"])
+                        # Skip messages from self
+                        if payload.get("source") == self._instance_id:
+                            continue
+                        config_json = payload.get("config", "")
+                        if config_json:
+                            callback(config_json)
+                            logger.info(
+                                f"Config update received from instance {payload.get('source')}"
+                            )
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.warning(f"Invalid config broadcast message: {e}")
+            except asyncio.CancelledError:
+                pass
+
+        self._sub_task = asyncio.create_task(_listener())
+        logger.info(f"Subscribed to config channel: {channel}")
+
+    async def unsubscribe_config(self) -> None:
+        """Stop config subscription."""
+        if self._sub_task and not self._sub_task.done():
+            self._sub_task.cancel()
+        if self._pubsub:
+            await self._pubsub.unsubscribe()
+            await self._pubsub.close()
+            self._pubsub = None
+        logger.info("Config subscription stopped")
 
     # --- Serialisation helpers ---
 

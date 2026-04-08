@@ -5,9 +5,10 @@ Config - Configuration management module.
 from .schema import (
     LLMStabilityConfig,
     ProviderConfig,
+    ModelConfig,
+    ModelProviderEntry,
     StrategyConfig,
     StrategyMode,
-    ModelRouteConfig,
     TimeoutConfig,
     HealthCheckConfig,
     MetricsConfig,
@@ -18,14 +19,14 @@ from .schema import (
     RedisConfig,
 )
 from .loader import load_config
-from .watcher import ConfigWatcher
 
 __all__ = [
     "LLMStabilityConfig",
     "ProviderConfig",
+    "ModelConfig",
+    "ModelProviderEntry",
     "StrategyConfig",
     "StrategyMode",
-    "ModelRouteConfig",
     "TimeoutConfig",
     "HealthCheckConfig",
     "MetricsConfig",
@@ -35,5 +36,4 @@ __all__ = [
     "StateBackendConfig",
     "RedisConfig",
     "load_config",
-    "ConfigWatcher",
 ]

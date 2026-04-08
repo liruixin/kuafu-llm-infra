@@ -12,6 +12,7 @@ import time
 from typing import Optional
 
 from .base import BaseStrategy, StrategyEvent, StrategyAction
+from .registry import register_strategy
 
 
 class ChunkGapStrategy(BaseStrategy):
@@ -51,3 +52,8 @@ class ChunkGapStrategy(BaseStrategy):
                 detail={"gap_seconds": gap, "threshold": self._threshold},
             )
         return None
+
+
+@register_strategy
+def create_chunk_gap(cfg, provider: str, model: str):
+    return ChunkGapStrategy(cfg.timeout.chunk_gap, provider, model)

@@ -3,109 +3,128 @@
 
 llm_stability:
 
-  # --- Provider definitions ---
+  # === Provider credentials (pure connection info, no model info) ===
   providers:
     openai-next:
+      type: openai                # "openai" | "anthropic"
       api_key: "sk-xxx"
-      openai_base_url: "https://api.openai-next.com/v1"
-      anthropic_base_url: "https://api.openai-next.com"
-      ping_model: "gpt-4.1-2025-04-14"
-      priority: 1
-      enabled: true
-      model_mapping:
-        claude-opus-4-5-20251101: claude-opus-4-6
+      base_url: "https://api.openai-next.com/v1"
 
     ppio:
+      type: openai
       api_key: "sk-yyy"
-      openai_base_url: "https://api.ppinfra.com/openai/v1"
-      anthropic_base_url: "https://api.ppinfra.com/anthropic"
-      ping_model: "deepseek-chat"
-      priority: 2
-      enabled: true
-      model_mapping: {}
+      base_url: "https://api.ppinfra.com/openai/v1"
 
     volces:
+      type: openai
       api_key: "sk-zzz"
-      openai_base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      ping_model: "deepseek-v3-2-251201"
-      priority: 3
-      enabled: true
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
 
-  # --- Business key strategies ---
+  # === Model definitions (model is the first-class citizen) ===
+  # Key = official/canonical model ID
+  # Each provider entry specifies the actual model_id at that provider.
+  # If model_id is omitted, it defaults to the key.
+  models:
+    claude-opus-4-5-20251101:
+      providers:
+        - provider: openai-next
+          priority: 1
+          probe: true
+          model_id: "claude-opus-4-5-20251101"
+        - provider: ppio
+          model_id: "pa/claude-opus-4-5-20251101"
+          priority: 2
+          probe: true
+
+    gpt-4.1-2025-04-14:
+      providers:
+        - provider: openai-next
+          priority: 1
+          probe: true
+        - provider: ppio
+          priority: 2
+          probe: true
+
+    deepseek-v3-2-251201:
+      providers:
+        - provider: volces
+          priority: 1
+          probe: true
+        - provider: ppio
+          model_id: "deepseek-chat"      # ppio uses "deepseek-chat"
+          priority: 2
+          probe: true
+
+  # === Business key strategies ===
+  # primary / fallback reference canonical model IDs (keys in models)
   strategies:
     # Requirement clarification — streaming, user-facing
     requirement_clarify:
       mode: stream
-      primary:
-        model: claude-opus-4-5-20251101
-        providers: [openai-next, ppio]
+      primary: claude-opus-4-5-20251101
       fallback:
-        - model: gpt-4.1-2025-04-14
-          providers: [openai-next, ppio]
-        - model: deepseek-v3-2-251201
-          providers: [volces]
+        - gpt-4.1-2025-04-14
+        - deepseek-v3-2-251201
       timeout:
-        ttft: 8            # First token timeout (seconds)
-        chunk_gap: 15       # Mid-stream stall timeout (seconds)
-        total: 120          # Total timeout (seconds)
+        ttft: 8
+        chunk_gap: 15
+        total: 120
       empty_frame_threshold: 5
-      slow_speed_threshold: 5.0  # tokens/sec
+      slow_speed_threshold: 5.0
 
     # Code generation — non-streaming, internal
     code_generation:
       mode: block
-      primary:
-        model: deepseek-v3-2-251201
-        providers: [volces, ppio]
+      primary: deepseek-v3-2-251201
       fallback:
-        - model: gpt-4.1-2025-04-14
-          providers: [openai-next]
+        - gpt-4.1-2025-04-14
       timeout:
         total: 60
 
     # Chat — streaming, general purpose
     chat:
       mode: stream
-      primary:
-        model: gpt-4.1-2025-04-14
-        providers: [openai-next, ppio]
+      primary: gpt-4.1-2025-04-14
       fallback:
-        - model: deepseek-v3-2-251201
-          providers: [volces]
+        - deepseek-v3-2-251201
       timeout:
         ttft: 6
         chunk_gap: 10
 
-  # --- Health check & speed probing (combined) ---
+  # === Health check & probing ===
   health_check:
-    interval: 20            # Seconds between probe rounds
-    failure_threshold: 3    # Consecutive failures → cooldown
-    recovery_threshold: 3   # Consecutive successes → recovery
-    timeout: 10             # Per-probe timeout (seconds)
-    probe_max_tokens: 5     # Max tokens for probe (controls cost)
-    stagger_interval: 2     # Seconds between individual probes
-    cooldown: 60            # Cooldown period (seconds)
+    interval: 20
+    failure_threshold: 3
+    recovery_threshold: 3
+    timeout: 10
+    probe_max_tokens: 5
+    stagger_interval: 2
+    cooldown: 60
 
-  # --- Metrics ---
+  # === Metrics ===
   metrics:
     enabled: true
-    backend: simple         # "simple" (in-memory) | "prometheus"
-    # port: 9091            # Uncomment to enable Prometheus /metrics endpoint
+    backend: simple           # "simple" (in-memory) | "prometheus"
+    # port: 9091              # Uncomment to enable Prometheus /metrics endpoint
+    label_keys:               # Custom label names for request-level metrics
+      - user_id
+      - module
+      # - env
 
-  # --- Alerting ---
+  # === Alerting ===
   alert:
     channels:
-      - type: log           # Always log alerts
+      - type: log
       # - type: feishu
       #   webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
       # - type: webhook
       #   url: "https://your-webhook.com/alert"
     rules:
-      silence_seconds: 60   # Suppress duplicate alerts within window
+      silence_seconds: 60
 
-  # --- State backend ---
+  # === State backend ===
   state_backend:
-    type: memory            # "memory" (default) | "redis"
+    type: memory              # "memory" (default) | "redis"
     # redis:
     #   url: "redis://localhost:6379/0"
     #   key_prefix: "llm_infra:"

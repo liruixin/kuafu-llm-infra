@@ -32,21 +32,20 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from .config.schema import LLMStabilityConfig, ProviderConfig
 from .config.loader import load_config
-from .config.watcher import ConfigWatcher
 from .providers.base import BaseProvider, ChatResponse, StreamChunk
-from .providers.openai_provider import OpenAIProvider
-from .providers.anthropic_provider import AnthropicProvider
+from .providers.registry import create_provider
 from .state.backend import StateBackend
 from .state.memory import MemoryBackend
 from .metrics.collector import MetricsCollector, NoopCollector
 from .metrics.simple import SimpleCollector
-from .alert.channels.base import AlertEvent, BaseAlertChannel
+from .alert.channels.base import BaseAlertChannel
 from .alert.channels.log import LogAlertChannel
 from .alert.channels.feishu import FeishuAlertChannel
 from .alert.channels.webhook import WebhookAlertChannel
@@ -124,6 +123,7 @@ class _Completions:
         messages: List[Dict[str, Any]],
         stream: bool = False,
         business_key: str = "default",
+        labels: Optional[Dict[str, str]] = None,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         **kwargs: Any,
@@ -135,6 +135,7 @@ class _Completions:
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                labels=labels,
                 **kwargs,
             )
             return _StreamWrapper(aiter)
@@ -145,6 +146,7 @@ class _Completions:
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                labels=labels,
                 **kwargs,
             )
             return _CompletionResponse(response)
@@ -165,15 +167,14 @@ class LLMClient:
     """
     OpenAI-compatible LLM client with built-in fallback,
     monitoring, and alerting.
+
+    Hot-reload: call ``update_config()`` to apply new config.
+    In multi-instance mode (Redis backend), the update is
+    automatically broadcast to all instances via pub/sub.
     """
 
-    def __init__(
-        self,
-        config: LLMStabilityConfig,
-        config_path: Optional[str] = None,
-    ) -> None:
+    def __init__(self, config: LLMStabilityConfig) -> None:
         self._config = config
-        self._config_path = config_path
 
         # State backend
         self._state = self._create_state_backend(config)
@@ -181,9 +182,8 @@ class LLMClient:
         # Metrics
         self._metrics = self._create_metrics(config)
 
-        # Alert
+        # Alert dispatcher
         self._alert_dispatcher = self._create_alert_dispatcher(config)
-        self._alert_queue = self._alert_dispatcher._queue if self._alert_dispatcher else None
 
         # Provider adapters
         self._adapters: Dict[str, BaseProvider] = {}
@@ -199,63 +199,125 @@ class LLMClient:
             scorer=self._scorer,
             state=self._state,
             metrics=self._metrics,
-            alert_queue=self._alert_queue,
+            alert_dispatcher=self._alert_dispatcher,
         )
 
         # Health checker
         self._health_checker = HealthChecker(
-            config=config.health_check,
-            providers=config.providers,
+            config=config,
             adapters=self._adapters,
             state=self._state,
             metrics=self._metrics,
-            alert_queue=self._alert_queue,
-        )
-
-        # Config watcher
-        self._config_watcher = ConfigWatcher(
-            config_path=config_path,
-            on_change=self._on_config_change,
+            alert_dispatcher=self._alert_dispatcher,
         )
 
         # OpenAI-compatible interface
         self.chat = _Chat(self._engine)
 
-        # Auto-start background tasks
         self._started = False
 
     def start(self) -> None:
-        """Start background tasks (health checker, config watcher, alert dispatcher)."""
+        """Start background tasks (health checker, config subscriber, alert dispatcher)."""
         if self._started:
             return
         self._health_checker.start()
-        self._config_watcher.start()
         if self._alert_dispatcher:
             self._alert_dispatcher.start()
+        asyncio.create_task(self._start_config_subscriber())
         self._started = True
         logger.info("LLMClient started")
 
     async def shutdown(self) -> None:
         """Gracefully stop all background tasks."""
         self._health_checker.stop()
-        self._config_watcher.stop()
+        await self._state.unsubscribe_config()
         if self._alert_dispatcher:
             await self._alert_dispatcher.stop()
         self._started = False
         logger.info("LLMClient shutdown")
 
-    def update_config(self, new_config: Union[Dict[str, Any], LLMStabilityConfig]) -> None:
-        """Programmatically update configuration (hot-reload)."""
+    async def update_config(
+        self,
+        new_config: Union[Dict[str, Any], LLMStabilityConfig],
+        *,
+        broadcast: bool = True,
+    ) -> None:
+        """
+        Apply new configuration (hot-reload).
+
+        Args:
+            new_config: New config as dict or LLMStabilityConfig.
+            broadcast: If True and Redis backend is active,
+                       publish to other instances via pub/sub.
+        """
         if isinstance(new_config, dict):
             new_config = LLMStabilityConfig(**new_config)
-        self._on_config_change(new_config)
+
+        self._apply_config(new_config)
+
+        if broadcast:
+            config_json = new_config.model_dump_json()
+            await self._state.publish_config(config_json)
+
+    # ------------------------------------------------------------------
+    # Internal: config subscriber
+    # ------------------------------------------------------------------
+
+    async def _start_config_subscriber(self) -> None:
+        """Subscribe to config updates from other instances."""
+        def _on_remote_config(config_json: str):
+            try:
+                data = json.loads(config_json)
+                new_config = LLMStabilityConfig(**data)
+                self._apply_config(new_config)
+                logger.info("Remote config update applied")
+            except Exception as e:
+                logger.error(f"Failed to apply remote config: {e}", exc_info=True)
+
+        await self._state.subscribe_config(_on_remote_config)
+
+    # ------------------------------------------------------------------
+    # Internal: apply config changes
+    # ------------------------------------------------------------------
+
+    def _apply_config(self, new_config: LLMStabilityConfig) -> None:
+        """Apply config diff — rebuild only what changed."""
+        old_config = self._config
+        self._config = new_config
+
+        # Rebuild adapters for changed providers
+        for name, provider_cfg in new_config.providers.items():
+            old_provider = old_config.providers.get(name)
+            if not provider_cfg.enabled:
+                self._adapters.pop(name, None)
+                continue
+            if (
+                old_provider is None
+                or old_provider.api_key != provider_cfg.api_key
+                or old_provider.base_url != provider_cfg.base_url
+            ):
+                adapter = self._create_adapter(provider_cfg)
+                if adapter:
+                    self._adapters[name] = adapter
+                    logger.info(f"Provider adapter rebuilt: {name}")
+
+        # Remove adapters for deleted providers
+        for name in list(self._adapters.keys()):
+            if name not in new_config.providers:
+                del self._adapters[name]
+                logger.info(f"Provider adapter removed: {name}")
+
+        # Update sub-components via public APIs (no private attribute access)
+        self._engine.update_config(new_config, self._adapters)
+        self._health_checker.update_config(new_config, self._adapters)
+
+        logger.info("Configuration applied")
 
     # ------------------------------------------------------------------
     # Internal: setup helpers
     # ------------------------------------------------------------------
 
     def _build_adapters(self, config: LLMStabilityConfig) -> None:
-        """Build SDK adapters for all configured providers."""
         for name, provider_cfg in config.providers.items():
             if not provider_cfg.enabled:
                 continue
@@ -263,40 +325,22 @@ class LLMClient:
             if adapter:
                 self._adapters[name] = adapter
 
-    def _create_adapter(self, provider_cfg: ProviderConfig) -> Optional[BaseProvider]:
-        """Create an SDK adapter based on provider config."""
+    @staticmethod
+    def _create_adapter(provider_cfg: ProviderConfig) -> Optional[BaseProvider]:
+        if not provider_cfg.base_url:
+            return None
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {provider_cfg.api_key}",
         }
 
-        # Determine type: if anthropic_base_url is set and no openai_base_url,
-        # it's anthropic. Otherwise default to openai.
-        if provider_cfg.anthropic_base_url and not provider_cfg.openai_base_url:
-            return AnthropicProvider(
-                api_key=provider_cfg.api_key,
-                base_url=provider_cfg.anthropic_base_url,
-                extra_headers=headers,
-            )
-
-        if provider_cfg.openai_base_url:
-            return OpenAIProvider(
-                api_key=provider_cfg.api_key,
-                base_url=provider_cfg.openai_base_url,
-                extra_headers=headers,
-            )
-
-        # Both URLs set — create both, but we need the strategy config
-        # to know which interface to use. Default to openai adapter.
-        if provider_cfg.anthropic_base_url:
-            # Store both; engine will pick based on model interface
-            return OpenAIProvider(
-                api_key=provider_cfg.api_key,
-                base_url=provider_cfg.openai_base_url or provider_cfg.anthropic_base_url,
-                extra_headers=headers,
-            )
-
-        return None
+        return create_provider(
+            provider_cfg.type,
+            api_key=provider_cfg.api_key,
+            base_url=provider_cfg.base_url,
+            extra_headers=headers,
+        )
 
     @staticmethod
     def _create_state_backend(config: LLMStabilityConfig) -> StateBackend:
@@ -320,7 +364,10 @@ class LLMClient:
         if config.metrics.backend == "prometheus":
             try:
                 from .metrics.prometheus import PrometheusCollector
-                return PrometheusCollector(port=config.metrics.port)
+                return PrometheusCollector(
+                    label_keys=config.metrics.label_keys,
+                    port=config.metrics.port,
+                )
             except ImportError:
                 logger.warning("prometheus_client not installed, using simple metrics")
         return SimpleCollector()
@@ -342,50 +389,6 @@ class LLMClient:
         rules = AlertRules(silence_seconds=config.alert.rules.silence_seconds)
         return AlertDispatcher(channels=channels, rules=rules)
 
-    # ------------------------------------------------------------------
-    # Internal: hot-reload
-    # ------------------------------------------------------------------
-
-    def _on_config_change(self, new_config: LLMStabilityConfig) -> None:
-        """Handle configuration change."""
-        old_config = self._config
-        self._config = new_config
-
-        # Rebuild adapters for changed providers
-        for name, provider_cfg in new_config.providers.items():
-            old_provider = old_config.providers.get(name)
-            if not provider_cfg.enabled:
-                self._adapters.pop(name, None)
-                continue
-            # Rebuild if new or changed
-            if (
-                old_provider is None
-                or old_provider.api_key != provider_cfg.api_key
-                or old_provider.openai_base_url != provider_cfg.openai_base_url
-                or old_provider.anthropic_base_url != provider_cfg.anthropic_base_url
-            ):
-                adapter = self._create_adapter(provider_cfg)
-                if adapter:
-                    self._adapters[name] = adapter
-                    logger.info(f"Provider adapter rebuilt: {name}")
-
-        # Remove adapters for deleted providers
-        for name in list(self._adapters.keys()):
-            if name not in new_config.providers:
-                del self._adapters[name]
-                logger.info(f"Provider adapter removed: {name}")
-
-        # Update engine references
-        self._engine._config = new_config
-        self._engine._adapters = self._adapters
-
-        # Update health checker
-        self._health_checker._config = new_config.health_check
-        self._health_checker._providers = new_config.providers
-        self._health_checker._adapters = self._adapters
-
-        logger.info("Configuration hot-reloaded")
-
 
 # ============================================================================
 # Factory function
@@ -403,8 +406,7 @@ def create_client(
     Returns:
         Configured LLMClient with background tasks started.
     """
-    config_path = str(source) if isinstance(source, (str, Path)) else None
     config = load_config(source)
-    client = LLMClient(config=config, config_path=config_path)
+    client = LLMClient(config=config)
     client.start()
     return client

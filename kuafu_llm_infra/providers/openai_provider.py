@@ -9,7 +9,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from openai import AsyncOpenAI
 
+from ..types import TokenUsage
 from .base import BaseProvider, ChatResponse, StreamChunk
+from .registry import register_provider
 
 
 class OpenAIProvider(BaseProvider):
@@ -58,13 +60,13 @@ class OpenAIProvider(BaseProvider):
             resp = await coro
 
         choice = resp.choices[0]
-        usage = {}
+        usage = TokenUsage()
         if resp.usage:
-            usage = {
-                "prompt_tokens": resp.usage.prompt_tokens,
-                "completion_tokens": resp.usage.completion_tokens,
-                "total_tokens": resp.usage.total_tokens,
-            }
+            usage = TokenUsage(
+                prompt_tokens=resp.usage.prompt_tokens,
+                completion_tokens=resp.usage.completion_tokens,
+                total_tokens=resp.usage.total_tokens,
+            )
 
         return ChatResponse(
             content=choice.message.content or "",
@@ -102,11 +104,30 @@ class OpenAIProvider(BaseProvider):
             stream = await coro
 
         async for chunk in stream:
+            usage = None
+            if hasattr(chunk, "usage") and chunk.usage is not None:
+                usage = TokenUsage(
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                    total_tokens=chunk.usage.total_tokens,
+                )
+
             if not chunk.choices:
+                if usage:
+                    yield StreamChunk(content="", usage=usage, raw=chunk)
                 continue
+
             delta = chunk.choices[0].delta
             yield StreamChunk(
                 content=delta.content or "",
                 finish_reason=chunk.choices[0].finish_reason,
+                usage=usage,
                 raw=chunk,
             )
+
+
+@register_provider("openai")
+def _create_openai(
+    api_key: str, base_url: str, extra_headers: dict | None = None,
+) -> OpenAIProvider:
+    return OpenAIProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)

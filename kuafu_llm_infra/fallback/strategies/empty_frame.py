@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .base import BaseStrategy, StrategyEvent, StrategyAction
+from .registry import register_strategy
 
 
 class EmptyFrameStrategy(BaseStrategy):
@@ -74,3 +75,8 @@ class EmptyFrameStrategy(BaseStrategy):
                 detail={"elapsed": elapsed},
             )
         return None
+
+
+@register_strategy
+def create_empty_frame(cfg, provider: str, model: str):
+    return EmptyFrameStrategy(cfg.empty_frame_threshold, provider, model)

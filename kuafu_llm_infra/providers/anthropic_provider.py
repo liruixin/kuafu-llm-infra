@@ -9,7 +9,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from anthropic import AsyncAnthropic
 
+from ..types import TokenUsage
 from .base import BaseProvider, ChatResponse, StreamChunk
+from .registry import register_provider
 
 
 class AnthropicProvider(BaseProvider):
@@ -89,13 +91,13 @@ class AnthropicProvider(BaseProvider):
             if block.type == "text":
                 content += block.text
 
-        usage = {}
+        usage = TokenUsage()
         if resp.usage:
-            usage = {
-                "prompt_tokens": resp.usage.input_tokens,
-                "completion_tokens": resp.usage.output_tokens,
-                "total_tokens": resp.usage.input_tokens + resp.usage.output_tokens,
-            }
+            usage = TokenUsage(
+                prompt_tokens=resp.usage.input_tokens,
+                completion_tokens=resp.usage.output_tokens,
+                total_tokens=resp.usage.input_tokens + resp.usage.output_tokens,
+            )
 
         return ChatResponse(
             content=content,
@@ -134,15 +136,39 @@ class AnthropicProvider(BaseProvider):
         else:
             stream = await coro
 
+        input_tokens = 0
+        output_tokens = 0
+
         async for event in stream:
+            if event.type == "message_start":
+                if hasattr(event.message, "usage") and event.message.usage:
+                    input_tokens = event.message.usage.input_tokens
+                continue
+
             if event.type == "content_block_delta":
                 yield StreamChunk(
                     content=event.delta.text if hasattr(event.delta, "text") else "",
                     raw=event,
                 )
+
             elif event.type == "message_delta":
+                if hasattr(event, "usage") and event.usage:
+                    output_tokens = event.usage.output_tokens
+                usage = TokenUsage(
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                )
                 yield StreamChunk(
                     content="",
                     finish_reason=event.delta.stop_reason,
+                    usage=usage,
                     raw=event,
                 )
+
+
+@register_provider("anthropic")
+def _create_anthropic(
+    api_key: str, base_url: str, extra_headers: dict | None = None,
+) -> AnthropicProvider:
+    return AnthropicProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)

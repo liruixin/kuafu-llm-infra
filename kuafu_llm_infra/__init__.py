@@ -34,8 +34,11 @@ Quick start::
 __version__ = "0.1.0"
 
 from .gateway import LLMClient, create_client
+from .types import TokenUsage, RequestContext
 
 __all__ = [
     "LLMClient",
     "create_client",
+    "TokenUsage",
+    "RequestContext",
 ]

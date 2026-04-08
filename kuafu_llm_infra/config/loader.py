@@ -77,7 +77,9 @@ def _parse_file(path: Path) -> LLMStabilityConfig:
 def _parse_dict(data: Dict[str, Any]) -> LLMStabilityConfig:
     """Parse a config dict into a validated LLMStabilityConfig."""
     try:
-        return LLMStabilityConfig(**data)
+        config = LLMStabilityConfig(**data)
+        config.validate_references()
+        return config
     except ValidationError as e:
         logger.error(f"Config validation failed:\n{e}")
         raise

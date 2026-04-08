@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from ..types import TokenUsage
+
 
 # ============================================================================
 # Unified response / stream types
@@ -32,7 +34,7 @@ class ChatResponse:
     content: str = ""
     model: str = ""
     finish_reason: str = "stop"
-    usage: Dict[str, int] = field(default_factory=dict)
+    usage: TokenUsage = field(default_factory=TokenUsage)
     raw: Any = None  # Original SDK response for passthrough
 
 
@@ -41,6 +43,7 @@ class StreamChunk:
     """A single chunk in a streaming response."""
     content: str = ""
     finish_reason: Optional[str] = None
+    usage: Optional[TokenUsage] = None  # Present on final chunk if SDK supports it
     raw: Any = None
 
 

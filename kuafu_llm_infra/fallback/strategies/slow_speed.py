@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .base import BaseStrategy, StrategyEvent, StrategyAction
+from .registry import register_strategy
 
 
 class SlowSpeedStrategy(BaseStrategy):
@@ -60,3 +61,8 @@ class SlowSpeedStrategy(BaseStrategy):
                 },
             )
         return None
+
+
+@register_strategy
+def create_slow_speed(cfg, provider: str, model: str):
+    return SlowSpeedStrategy(cfg.slow_speed_threshold, provider, model)

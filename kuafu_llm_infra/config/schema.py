@@ -13,37 +13,48 @@ from pydantic import BaseModel, Field
 
 
 # ============================================================================
-# Provider config
+# Provider config (pure credentials, no model info)
 # ============================================================================
 
 class ProviderConfig(BaseModel):
-    """Single LLM provider configuration."""
+    """
+    Single LLM provider connection credentials.
+
+    Providers are pure connection endpoints — model-specific
+    configuration lives in ``ModelConfig``.
+    """
     name: str = ""
+    type: str = "openai"  # "openai" | "anthropic"
     api_key: str = ""
-    openai_base_url: Optional[str] = None
-    anthropic_base_url: Optional[str] = None
-    ping_model: str = ""
-    priority: int = 99
+    base_url: str = ""
     enabled: bool = True
-    model_mapping: Dict[str, str] = Field(default_factory=dict)
-
-    def get_base_url(self, interface: str) -> Optional[str]:
-        if interface == "openai":
-            return self.openai_base_url
-        if interface == "google":
-            return None
-        return self.anthropic_base_url
 
 
 # ============================================================================
-# Model & strategy config
+# Model config (model is the first-class citizen)
 # ============================================================================
 
-class ModelRouteConfig(BaseModel):
-    """A model with its provider list."""
-    model: str
-    providers: List[str]
+class ModelProviderEntry(BaseModel):
+    """One provider's entry under a model definition."""
+    provider: str                            # references key in providers dict
+    model_id: Optional[str] = None           # actual ID at this provider; None → same as model key
+    priority: int = 99
+    probe: bool = True                       # whether to health-probe this (model, provider)
 
+
+class ModelConfig(BaseModel):
+    """
+    Configuration for a single canonical model.
+
+    The dict key is the official model ID (e.g. ``claude-opus-4-5-20251101``).
+    Each entry lists the providers that offer this model.
+    """
+    providers: List[ModelProviderEntry] = Field(default_factory=list)
+
+
+# ============================================================================
+# Strategy config
+# ============================================================================
 
 class StrategyMode(str, Enum):
     STREAM = "stream"
@@ -58,10 +69,15 @@ class TimeoutConfig(BaseModel):
 
 
 class StrategyConfig(BaseModel):
-    """Business-key level strategy configuration."""
+    """
+    Business-key level strategy configuration.
+
+    ``primary`` and ``fallback`` reference canonical model IDs
+    (keys in the ``models`` dict).
+    """
     mode: StrategyMode = StrategyMode.STREAM
-    primary: ModelRouteConfig
-    fallback: List[ModelRouteConfig] = Field(default_factory=list)
+    primary: str                              # canonical model ID
+    fallback: List[str] = Field(default_factory=list)  # ordered fallback model IDs
     timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
     empty_frame_threshold: int = 5
     slow_speed_threshold: float = 5.0  # tokens/sec
@@ -91,6 +107,7 @@ class MetricsConfig(BaseModel):
     enabled: bool = True
     backend: str = "simple"  # "simple" | "prometheus"
     port: Optional[int] = None  # Only for prometheus
+    label_keys: List[str] = Field(default_factory=list)  # Custom label names for request-level metrics
 
 
 # ============================================================================
@@ -145,6 +162,7 @@ class LLMStabilityConfig(BaseModel):
     in the user's YAML file.
     """
     providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+    models: Dict[str, ModelConfig] = Field(default_factory=dict)
     strategies: Dict[str, StrategyConfig] = Field(default_factory=dict)
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
@@ -156,3 +174,60 @@ class LLMStabilityConfig(BaseModel):
         for name, provider in self.providers.items():
             if not provider.name:
                 provider.name = name
+
+    def resolve_model_id(self, canonical_model: str, provider_name: str) -> str:
+        """Resolve the actual model_id for a (model, provider) pair."""
+        model_cfg = self.models.get(canonical_model)
+        if model_cfg:
+            for entry in model_cfg.providers:
+                if entry.provider == provider_name:
+                    return entry.model_id or canonical_model
+        return canonical_model
+
+    def get_model_providers(self, canonical_model: str) -> List[ModelProviderEntry]:
+        """Get all provider entries for a canonical model."""
+        model_cfg = self.models.get(canonical_model)
+        if model_cfg:
+            return model_cfg.providers
+        return []
+
+    def validate_references(self) -> None:
+        """
+        Validate cross-references in the config.
+
+        Raises ``ValueError`` with a summary of all broken references.
+        """
+        errors: List[str] = []
+
+        # Each model must reference existing, enabled providers
+        for model_name, model_cfg in self.models.items():
+            enabled_count = 0
+            for entry in model_cfg.providers:
+                provider_cfg = self.providers.get(entry.provider)
+                if provider_cfg is None:
+                    errors.append(
+                        f"Model '{model_name}' references unknown provider '{entry.provider}'"
+                    )
+                elif provider_cfg.enabled:
+                    enabled_count += 1
+            if enabled_count == 0 and model_cfg.providers:
+                errors.append(
+                    f"Model '{model_name}' has no enabled providers"
+                )
+
+        # Each strategy must reference existing models
+        for key, strategy in self.strategies.items():
+            if strategy.primary not in self.models:
+                errors.append(
+                    f"Strategy '{key}' references unknown primary model '{strategy.primary}'"
+                )
+            for fb in strategy.fallback:
+                if fb not in self.models:
+                    errors.append(
+                        f"Strategy '{key}' references unknown fallback model '{fb}'"
+                    )
+
+        if errors:
+            raise ValueError(
+                "Config reference validation failed:\n  - " + "\n  - ".join(errors)
+            )

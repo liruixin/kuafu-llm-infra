@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .base import BaseStrategy, StrategyEvent, StrategyAction
+from .registry import register_strategy
 
 
 class TtftTimeoutStrategy(BaseStrategy):
@@ -56,3 +57,8 @@ class TtftTimeoutStrategy(BaseStrategy):
                 detail={"ttft_threshold": self._threshold, "elapsed": elapsed},
             )
         return None
+
+
+@register_strategy
+def create_ttft_timeout(cfg, provider: str, model: str):
+    return TtftTimeoutStrategy(cfg.timeout.ttft, provider, model)
