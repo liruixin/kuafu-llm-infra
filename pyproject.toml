@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kuafu-llm-infra"
+version = "0.1.0"
+description = "LLM infrastructure layer with multi-provider fallback, health monitoring, speed probing, and alerting."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "KuafuAI", email = "dev@kuafuai.com"},
+]
+keywords = ["llm", "fallback", "monitoring", "openai", "anthropic", "infrastructure"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "openai>=1.0",
+    "anthropic>=0.30",
+    "httpx>=0.25",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+google = ["google-genai>=1.0"]
+prometheus = ["prometheus-client>=0.20"]
+redis = ["redis>=5.0"]
+all = ["kuafu-llm-infra[google,prometheus,redis]"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/kuafuai/kuafu-llm-infra"
+Repository = "https://github.com/kuafuai/kuafu-llm-infra"
+Issues = "https://github.com/kuafuai/kuafu-llm-infra/issues"
+
+[tool.setuptools.packages.find]
+include = ["kuafu_llm_infra*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,92 @@
+"""
+Base class for fallback strategies.
+
+Each strategy monitors an ongoing request (stream or block) and
+decides whether the current provider should be abandoned. Strategies
+are stateful per-request — a new instance is created for each attempt.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, Optional
+
+
+class StrategyAction(str, Enum):
+    """What the engine should do when a strategy fires."""
+    SWITCH = "switch"   # Abort current provider, try next
+    RECORD = "record"   # Cannot switch (content already sent), record only
+
+
+@dataclass
+class StrategyEvent:
+    """Event emitted when a strategy detects an anomaly."""
+    strategy: str       # Strategy name, e.g. "ttft_timeout"
+    action: StrategyAction
+    provider: str
+    model: str
+    detail: Dict[str, Any] = field(default_factory=dict)
+
+
+class BaseStrategy(ABC):
+    """
+    Per-request strategy instance.
+
+    Created fresh for each provider attempt. The engine calls
+    ``on_chunk()`` for every stream chunk (or ``on_complete()``
+    for block requests), and the strategy returns an event if
+    anomaly is detected.
+    """
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Strategy identifier, used in metrics labels."""
+        ...
+
+    @abstractmethod
+    def on_chunk(
+        self,
+        content: str,
+        is_first: bool,
+        elapsed: float,
+        total_tokens: int,
+    ) -> Optional[StrategyEvent]:
+        """
+        Called for each stream chunk.
+
+        Args:
+            content: The text content of this chunk (may be empty).
+            is_first: Whether this is the very first chunk.
+            elapsed: Seconds since request start.
+            total_tokens: Cumulative tokens received so far.
+
+        Returns:
+            A StrategyEvent if anomaly detected, else None.
+        """
+        ...
+
+    def on_complete(
+        self,
+        content: str,
+        elapsed: float,
+        total_tokens: int,
+    ) -> Optional[StrategyEvent]:
+        """
+        Called when a block (non-stream) request completes.
+
+        Default implementation does nothing. Override in strategies
+        that apply to non-streaming scenarios.
+        """
+        return None
+
+    def on_timeout(self, elapsed: float) -> Optional[StrategyEvent]:
+        """
+        Called when the request times out before any response.
+
+        Default implementation does nothing. Override in strategies
+        that handle timeout scenarios.
+        """
+        return None
