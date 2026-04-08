@@ -350,6 +350,319 @@ def create_my_strategy(cfg, provider, model):
 
 策略自动生效，Engine 无需任何修改。
 
+## 业务系统集成最佳实践
+
+### 1. 生命周期管理
+
+`LLMClient` 包含后台探测任务和告警消费任务，必须配合应用生命周期正确启停。
+
+**FastAPI**
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from kuafu_llm_infra import create_client
+
+llm_client = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global llm_client
+    llm_client = create_client("llm_stability.yaml")  # start() 在内部自动调用
+    yield
+    await llm_client.shutdown()
+
+app = FastAPI(lifespan=lifespan)
+```
+
+**Django（ASGI）**
+
+```python
+# myapp/apps.py
+import asyncio
+from django.apps import AppConfig
+from kuafu_llm_infra import create_client
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        from myapp.globals import llm_client_holder
+        loop = asyncio.get_event_loop()
+        llm_client_holder.client = create_client("llm_stability.yaml")
+
+# myapp/globals.py
+class _Holder:
+    client = None
+
+llm_client_holder = _Holder()
+```
+
+> **关键原则**：全进程共享一个 `LLMClient` 实例。多次 `create_client()` 会创建多套探测任务和状态，浪费资源且评分数据不共享。
+
+---
+
+### 2. 按业务场景设计 Strategy
+
+Strategy 是连接「业务需求」和「模型选择」的桥梁。**每个 business_key 应对应一类真实的业务场景**，而非每个 API 接口一个。
+
+```yaml
+strategies:
+  # ✅ 好的设计：按场景划分
+  user_facing_chat:          # 用户可见的对话，要求低延迟
+    mode: stream
+    primary: claude-opus-4-5-20251101
+    fallback: [gpt-4.1-2025-04-14]
+    timeout:
+      ttft: 5                # 用户等待容忍度低
+      chunk_gap: 10
+    slow_speed_threshold: 8.0
+
+  background_analysis:       # 后台批量分析，容忍高延迟
+    mode: block
+    primary: deepseek-v3-2-251201
+    fallback: [gpt-4.1-2025-04-14]
+    timeout:
+      total: 120             # 可以等久一些
+
+  # ❌ 不好的设计：按接口划分
+  # /api/v1/chat → chat_v1
+  # /api/v2/chat → chat_v2     ← 实际需求相同，不应拆分
+```
+
+---
+
+### 3. Labels 设计规范
+
+`labels` 是指标的自定义维度。设计原则：**低基数、高价值、按需投入**。
+
+```yaml
+metrics:
+  label_keys: [module, env]   # 在配置中声明所有可能的 label 名
+```
+
+```python
+# ✅ 推荐：低基数、有分析价值
+await client.chat.completions.create(
+    ...,
+    labels={"module": "customer_service", "env": "prod"},
+)
+
+# ❌ 避免：高基数字段（会导致 Prometheus 时间序列爆炸）
+labels={"request_id": "uuid-xxx", "user_id": "每个用户不同"}
+```
+
+| 推荐维度 | 示例值 | 说明 |
+|---------|--------|------|
+| `module` | `chat`, `analysis`, `code_gen` | 业务模块 |
+| `env` | `prod`, `staging` | 部署环境 |
+| `priority` | `high`, `normal` | 业务优先级 |
+| `team` | `algo`, `platform` | 调用团队 |
+
+> 如果只需要在日志排查时关联请求 ID，放在日志 context 里而非 labels。
+
+---
+
+### 4. 错误处理
+
+```python
+from kuafu_llm_infra.fallback.engine import AllProvidersExhausted
+
+async def call_llm(messages: list) -> str:
+    try:
+        resp = await client.chat.completions.create(
+            business_key="user_facing_chat",
+            messages=messages,
+            labels={"module": "chat"},
+        )
+        return resp.content
+
+    except AllProvidersExhausted:
+        # 所有提供商（含 fallback）均不可用
+        # 此时库已自动发送告警，业务层做兜底
+        return "抱歉，服务暂时不可用，请稍后再试。"
+
+    except ValueError as e:
+        # business_key 未在配置中定义且未传 model
+        logging.error(f"配置错误: {e}")
+        raise
+```
+
+**流式场景的特殊性**：Phase 1（首 Token 前）降级对用户无感；Phase 2（已返回部分内容）无法切换，库会记录异常但不中断流。业务层应在流结束后检查是否完整：
+
+```python
+stream = await client.chat.completions.create(
+    business_key="user_facing_chat",
+    messages=messages,
+    stream=True,
+)
+
+content = ""
+async for chunk in stream:
+    content += chunk.content
+    yield chunk.content          # SSE 推送给前端
+
+if not content.strip():
+    # 极端情况：所有提供商都在 Phase 1 被切换，但最终仍无内容
+    yield "[服务异常，请重试]"
+```
+
+---
+
+### 5. 多实例部署
+
+生产环境通常多实例部署，需要 Redis 后端保证：
+
+- **探测去重** — 分布式锁，同一 (model, provider) 不被多实例重复探测
+- **评分共享** — ScoreCard 存储在 Redis，所有实例基于相同数据排序
+- **配置同步** — 一个实例 `update_config()` → Pub/Sub → 全集群生效
+
+```yaml
+state_backend:
+  type: redis
+  redis:
+    url: "redis://redis:6379/0"
+    key_prefix: "llm_infra:"       # 多项目共用 Redis 时通过前缀隔离
+```
+
+```python
+# 管理后台触发配置变更
+new_config = fetch_config_from_admin_panel()
+await client.update_config(new_config, broadcast=True)
+# → 本实例立即生效
+# → 其他实例通过 Redis Pub/Sub 自动同步
+```
+
+> **单实例 / 开发环境**：使用默认的 `type: memory` 即可，零依赖。
+
+---
+
+### 6. 监控与告警
+
+#### Prometheus + Grafana
+
+```yaml
+metrics:
+  enabled: true
+  backend: prometheus
+  port: 9091                 # 启动 /metrics HTTP 端点
+  label_keys: [module, env]
+```
+
+推荐 Grafana Dashboard 面板：
+
+| 面板 | PromQL | 说明 |
+|------|--------|------|
+| 请求成功率 | `sum(rate(llm_request_total{status="success"}[5m])) / sum(rate(llm_request_total[5m]))` | 整体成功率 |
+| P99 TTFT | `histogram_quantile(0.99, rate(llm_ttft_seconds_bucket[5m]))` | 首 Token 延迟分布 |
+| Token 消耗 | `sum(rate(llm_input_tokens_total[1h])) + sum(rate(llm_output_tokens_total[1h]))` | 每小时 Token 消耗速率 |
+| 降级次数 | `sum(rate(llm_strategy_triggered_total[5m])) by (strategy)` | 按策略类型分组 |
+| 提供商健康 | `llm_provider_health` | 直接展示 0/1 |
+
+#### 告警通道
+
+```yaml
+alert:
+  channels:
+    - type: log                           # 开发环境：输出到日志
+    - type: feishu                        # 飞书群告警
+      webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+    - type: webhook                       # 接入自有告警平台
+      url: "https://your-alert-platform.com/api/alert"
+  rules:
+    silence_seconds: 60                   # 同一 (title, provider) 60 秒内不重复告警
+```
+
+---
+
+### 7. 配置管理建议
+
+#### 开发环境
+
+```yaml
+# config/llm_stability.dev.yaml
+llm_stability:
+  providers:
+    dev-proxy:
+      type: openai
+      api_key: "sk-dev-xxx"
+      base_url: "http://localhost:8080/v1"
+
+  metrics:
+    enabled: true
+    backend: simple            # 开发用内存指标，无需 Prometheus
+
+  state_backend:
+    type: memory
+
+  health_check:
+    interval: 60               # 开发环境降低探测频率
+```
+
+#### 生产环境
+
+```yaml
+# config/llm_stability.prod.yaml
+llm_stability:
+  providers:
+    primary-vendor:
+      type: openai
+      api_key: "${LLM_PRIMARY_API_KEY}"     # 通过环境变量注入敏感信息
+      base_url: "https://api.primary.com/v1"
+    backup-vendor:
+      type: openai
+      api_key: "${LLM_BACKUP_API_KEY}"
+      base_url: "https://api.backup.com/v1"
+
+  metrics:
+    enabled: true
+    backend: prometheus
+    port: 9091
+    label_keys: [module, env]
+
+  state_backend:
+    type: redis
+    redis:
+      url: "${REDIS_URL}"
+
+  health_check:
+    interval: 20
+    failure_threshold: 3
+    cooldown: 60
+```
+
+> **提示**：YAML 中的 `${ENV_VAR}` 需要业务层在加载前做环境变量替换，或使用 dict 方式传入配置：
+
+```python
+import os, yaml
+
+with open("config/llm_stability.prod.yaml") as f:
+    raw = f.read()
+    for key, value in os.environ.items():
+        raw = raw.replace(f"${{{key}}}", value)
+    config_dict = yaml.safe_load(raw)
+
+client = create_client(config_dict)
+```
+
+---
+
+### 8. 集成检查清单
+
+上线前对照检查：
+
+- [ ] `create_client()` 只在启动时调用一次，全进程共享
+- [ ] 应用退出时调用 `await client.shutdown()`
+- [ ] `business_key` 按业务场景而非接口划分
+- [ ] `label_keys` 已声明，且所有调用点传入了对应的 `labels`
+- [ ] `labels` 中无高基数字段（request_id、user_id 等）
+- [ ] 每个 model 至少配了 2 个 provider（单 provider 无降级意义）
+- [ ] 每个 strategy 至少配了 1 个 fallback 模型
+- [ ] 多实例部署已切换 `state_backend: redis`
+- [ ] Prometheus 端口已配置且被监控系统抓取
+- [ ] 告警通道已配置且经过测试
+- [ ] 配置文件中无硬编码 API Key（使用环境变量或密钥管理服务）
+
 ## 环境要求
 
 - Python >= 3.10
