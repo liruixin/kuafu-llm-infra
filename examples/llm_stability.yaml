@@ -57,6 +57,12 @@ llm_stability:
 
   # === Business key strategies ===
   # primary / fallback reference canonical model IDs (keys in models)
+
+  #todo 手动指定权重
+  #todo 固定的 fallback
+  #todo cache token nums
+  #todo 指定分数下不及格
+  #
   strategies:
     # Requirement clarification — streaming, user-facing
     requirement_clarify:

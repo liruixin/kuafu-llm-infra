@@ -33,6 +33,8 @@ class RequestContext:
     model: Optional[str] = None
     max_tokens: int = 4096
     temperature: Optional[float] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[str] = None
     extra_kwargs: Dict[str, Any] = field(default_factory=dict)
 
     # Filled by the engine during execution

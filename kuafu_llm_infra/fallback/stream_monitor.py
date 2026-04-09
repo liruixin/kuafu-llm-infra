@@ -73,6 +73,8 @@ class StreamMonitor:
                 max_tokens=ctx.max_tokens,
                 temperature=ctx.temperature,
                 timeout=strategy_cfg.timeout.ttft + 5,
+                tools=ctx.tools,
+                tool_choice=ctx.tool_choice,
                 **ctx.extra_kwargs,
             )
 

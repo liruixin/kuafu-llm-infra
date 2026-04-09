@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from openai import AsyncOpenAI
 
 from ..types import TokenUsage
-from .base import BaseProvider, ChatResponse, StreamChunk
+from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall
 from .registry import register_provider
 
 
@@ -41,6 +41,8 @@ class OpenAIProvider(BaseProvider):
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> ChatResponse:
         params: Dict[str, Any] = dict(
@@ -52,6 +54,10 @@ class OpenAIProvider(BaseProvider):
         )
         if temperature is not None:
             params["temperature"] = temperature
+        if tools is not None:
+            params["tools"] = tools
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
 
         coro = self._client.chat.completions.create(**params)
         if timeout is not None:
@@ -68,11 +74,24 @@ class OpenAIProvider(BaseProvider):
                 total_tokens=resp.usage.total_tokens,
             )
 
+        tool_calls = None
+        if choice.message.tool_calls:
+            tool_calls = [
+                ToolCall(
+                    id=tc.id,
+                    type=tc.type or "function",
+                    function_name=tc.function.name or "",
+                    function_arguments=tc.function.arguments or "",
+                )
+                for tc in choice.message.tool_calls
+            ]
+
         return ChatResponse(
             content=choice.message.content or "",
             model=resp.model,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
+            tool_calls=tool_calls,
             raw=resp,
         )
 
@@ -84,6 +103,8 @@ class OpenAIProvider(BaseProvider):
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         params: Dict[str, Any] = dict(
@@ -96,6 +117,10 @@ class OpenAIProvider(BaseProvider):
         )
         if temperature is not None:
             params["temperature"] = temperature
+        if tools is not None:
+            params["tools"] = tools
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
 
         coro = self._client.chat.completions.create(**params)
         if timeout is not None:
@@ -118,10 +143,22 @@ class OpenAIProvider(BaseProvider):
                 continue
 
             delta = chunk.choices[0].delta
+            delta_tool_calls = None
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                delta_tool_calls = [
+                    ToolCall(
+                        id=tc.id or "",
+                        type=tc.type or "function",
+                        function_name=tc.function.name if tc.function and tc.function.name else "",
+                        function_arguments=tc.function.arguments if tc.function and tc.function.arguments else "",
+                    )
+                    for tc in delta.tool_calls
+                ]
             yield StreamChunk(
                 content=delta.content or "",
                 finish_reason=chunk.choices[0].finish_reason,
                 usage=usage,
+                tool_calls=delta_tool_calls,
                 raw=chunk,
             )
 

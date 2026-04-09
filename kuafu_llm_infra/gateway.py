@@ -39,7 +39,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from .config.schema import LLMStabilityConfig, ProviderConfig
 from .config.loader import load_config
-from .providers.base import BaseProvider, ChatResponse, StreamChunk
+from .providers.base import BaseProvider, ChatResponse, StreamChunk, ToolCall
 from .providers.registry import create_provider
 from .state.backend import StateBackend
 from .state.memory import MemoryBackend
@@ -63,16 +63,19 @@ logger = logging.getLogger("kuafu_llm_infra.gateway")
 # ============================================================================
 
 class _Choice:
-    def __init__(self, content: str, finish_reason: str = "stop") -> None:
-        self.message = _Message(content)
+    def __init__(self, content: str, finish_reason: str = "stop",
+                 tool_calls: Optional[List[ToolCall]] = None) -> None:
+        self.message = _Message(content, tool_calls=tool_calls)
         self.finish_reason = finish_reason
         self.index = 0
 
 
 class _Message:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str,
+                 tool_calls: Optional[List[ToolCall]] = None) -> None:
         self.role = "assistant"
         self.content = content
+        self.tool_calls = tool_calls
 
 
 class _StreamChunkWrapper:
@@ -80,6 +83,7 @@ class _StreamChunkWrapper:
     def __init__(self, chunk: StreamChunk) -> None:
         self.content = chunk.content
         self.finish_reason = chunk.finish_reason
+        self.tool_calls = chunk.tool_calls
         self.raw = chunk.raw
 
 
@@ -88,7 +92,12 @@ class _CompletionResponse:
     def __init__(self, chat_response: ChatResponse) -> None:
         self.content = chat_response.content
         self.model = chat_response.model
-        self.choices = [_Choice(chat_response.content, chat_response.finish_reason)]
+        self.tool_calls = chat_response.tool_calls
+        self.choices = [_Choice(
+            chat_response.content,
+            chat_response.finish_reason,
+            tool_calls=chat_response.tool_calls,
+        )]
         self.usage = chat_response.usage
         self.raw = chat_response.raw
 
@@ -126,8 +135,33 @@ class _Completions:
         labels: Optional[Dict[str, str]] = None,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> Union[_CompletionResponse, _StreamWrapper]:
+        """Create a chat completion.
+
+        Args:
+            tools: Tool definitions for function calling. Each item
+                follows the **OpenAI tool format**::
+
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "description": "Get current weather",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "city": {"type": "string"}
+                                },
+                                "required": ["city"]
+                            }
+                        }
+                    }
+
+            tool_choice: Controls how the model selects tools.
+                ``"auto"`` | ``"none"``.        """
         if stream:
             aiter = self._engine.execute_chat_stream(
                 business_key=business_key,
@@ -135,6 +169,8 @@ class _Completions:
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                tools=tools,
+                tool_choice=tool_choice,
                 labels=labels,
                 **kwargs,
             )
@@ -146,6 +182,8 @@ class _Completions:
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                tools=tools,
+                tool_choice=tool_choice,
                 labels=labels,
                 **kwargs,
             )

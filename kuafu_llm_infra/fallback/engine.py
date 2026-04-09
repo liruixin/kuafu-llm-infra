@@ -77,10 +77,46 @@ class FallbackEngine:
         model: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         labels: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        """Execute a non-streaming chat request with fallback."""
+        """Execute a non-streaming chat request with fallback.
+
+        Args:
+            business_key: Strategy key defined in config.
+            messages: Conversation messages in OpenAI format.
+            model: Override model (bypasses strategy resolution).
+            max_tokens: Maximum tokens to generate.
+            temperature: Sampling temperature.
+            tools: Tool definitions for function calling. Each item
+                follows the **OpenAI tool format**::
+
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "description": "Get current weather",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "city": {"type": "string"}
+                                },
+                                "required": ["city"]
+                            }
+                        }
+                    }
+
+                The library uses OpenAI format as the unified standard.
+                Provider adapters convert to their native format
+                automatically (e.g. Anthropic ``input_schema``).
+            tool_choice: Controls how the model selects tools.
+                - ``"auto"`` – model decides (default when tools present)
+                - ``"none"`` – model must not call tools
+            labels: Custom label key-value pairs for metrics.
+            **kwargs: Additional provider-specific parameters.
+        """
         ctx = RequestContext(
             business_key=business_key,
             messages=messages,
@@ -88,6 +124,8 @@ class FallbackEngine:
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice,
             extra_kwargs=kwargs,
         )
         strategy_cfg = self._resolve_strategy(ctx)
@@ -121,6 +159,8 @@ class FallbackEngine:
                             max_tokens=max_tokens,
                             temperature=temperature,
                             timeout=timeout,
+                            tools=tools,
+                            tool_choice=tool_choice,
                             **kwargs,
                         ),
                         timeout=timeout,
@@ -128,7 +168,7 @@ class FallbackEngine:
 
                     duration = time.monotonic() - start
 
-                    if not response.content.strip():
+                    if not response.content.strip() and not response.tool_calls:
                         raise StrategyTriggered(StrategyEvent(
                             strategy="empty_response",
                             action=StrategyAction.SWITCH,
@@ -186,10 +226,18 @@ class FallbackEngine:
         model: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         labels: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Execute a streaming chat request with fallback."""
+        """Execute a streaming chat request with fallback.
+
+        Args:
+            tools: Same format as :meth:`execute_chat`. See that method
+                for the full tool definition schema.
+            tool_choice: Same format as :meth:`execute_chat`.
+        """
         ctx = RequestContext(
             business_key=business_key,
             messages=messages,
@@ -197,6 +245,8 @@ class FallbackEngine:
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice,
             extra_kwargs=kwargs,
         )
         strategy_cfg = self._resolve_strategy(ctx)

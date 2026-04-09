@@ -29,12 +29,22 @@ class ChatMessage:
 
 
 @dataclass
+class ToolCall:
+    """A single tool/function call returned by the model."""
+    id: str
+    type: str = "function"
+    function_name: str = ""
+    function_arguments: str = ""  # JSON string
+
+
+@dataclass
 class ChatResponse:
     """Non-streaming LLM response."""
     content: str = ""
     model: str = ""
     finish_reason: str = "stop"
     usage: TokenUsage = field(default_factory=TokenUsage)
+    tool_calls: Optional[List[ToolCall]] = None
     raw: Any = None  # Original SDK response for passthrough
 
 
@@ -44,6 +54,7 @@ class StreamChunk:
     content: str = ""
     finish_reason: Optional[str] = None
     usage: Optional[TokenUsage] = None  # Present on final chunk if SDK supports it
+    tool_calls: Optional[List[ToolCall]] = None  # Incremental tool call deltas
     raw: Any = None
 
 
@@ -69,9 +80,48 @@ class BaseProvider(ABC):
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        """Non-streaming chat completion."""
+        """Non-streaming chat completion.
+
+        Args:
+            model: Model identifier, e.g. ``"gpt-4.1"``.
+            messages: Conversation messages in OpenAI format.
+            max_tokens: Maximum tokens to generate.
+            temperature: Sampling temperature.
+            timeout: Request timeout in seconds.
+            tools: Tool definitions for function calling. Each item
+                follows the **OpenAI tool format**::
+
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "description": "Get current weather for a city",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "city": {
+                                        "type": "string",
+                                        "description": "City name"
+                                    }
+                                },
+                                "required": ["city"]
+                            }
+                        }
+                    }
+
+                Provider adapters are responsible for converting this
+                unified format to their SDK's native format (e.g.
+                Anthropic ``input_schema``).
+            tool_choice: Controls how the model selects tools.
+                - ``"auto"`` – model decides whether to call a tool
+                  (default when tools are present).
+                - ``"none"`` – model must not call any tool.
+            **kwargs: Additional provider-specific parameters.
+        """
         ...
 
     @abstractmethod
@@ -83,9 +133,22 @@ class BaseProvider(ABC):
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Streaming chat completion. Yields StreamChunk objects."""
+        """Streaming chat completion. Yields ``StreamChunk`` objects.
+
+        Args:
+            tools: Same format as :meth:`chat`. See that method for the
+                full tool definition schema.
+            tool_choice: Same format as :meth:`chat`.
+
+        When the model invokes a tool during streaming, chunks will
+        carry ``tool_calls`` with incremental argument fragments. The
+        caller should concatenate ``function_arguments`` across chunks
+        sharing the same ``ToolCall.id`` to reconstruct the full JSON.
+        """
         ...
 
     async def probe(

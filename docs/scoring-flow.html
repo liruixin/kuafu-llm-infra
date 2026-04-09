@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>kuafu-llm-infra - 评分与请求流转全景图</title>
+<style>
+  body { margin: 0; background: #0f1117; display: flex; justify-content: center; padding: 40px 20px; }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 2920" width="1400" height="2920" font-family="'PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f1117"/><stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e3a5f"/><stop offset="100%" stop-color="#1a2940"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a3d2e"/><stop offset="100%" stop-color="#162d23"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3d2e1a"/><stop offset="100%" stop-color="#2d2316"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2d1a3d"/><stop offset="100%" stop-color="#231630"/>
+    </linearGradient>
+    <linearGradient id="scoreCardGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c2333"/><stop offset="100%" stop-color="#151b28"/>
+    </linearGradient>
+    <linearGradient id="scorerGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#164e63"/><stop offset="100%" stop-color="#134152"/>
+    </linearGradient>
+    <linearGradient id="alertRedGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3d1a1a"/><stop offset="100%" stop-color="#2d1616"/>
+    </linearGradient>
+
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+
+    <marker id="arrowBlueM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#3b82f6"/></marker>
+    <marker id="arrowGreenM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22c55e"/></marker>
+    <marker id="arrowOrangeM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#f59e0b"/></marker>
+    <marker id="arrowRedM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#ef4444"/></marker>
+    <marker id="arrowPurpleM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#a855f7"/></marker>
+    <marker id="arrowWhiteM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#94a3b8"/></marker>
+    <marker id="arrowCyanM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#06b6d4"/></marker>
+    <marker id="arrowPromM" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#e65100"/></marker>
+  </defs>
+
+  <rect width="1400" height="2920" fill="url(#bgGrad)"/>
+
+  <!-- ================================================================== -->
+  <!-- TITLE -->
+  <!-- ================================================================== -->
+  <text x="700" y="50" text-anchor="middle" fill="#f1f5f9" font-size="28" font-weight="700" letter-spacing="2">评分 · 指标 · 监控 全景图</text>
+  <text x="700" y="76" text-anchor="middle" fill="#64748b" font-size="14">kuafu-llm-infra  |  每个 (model x provider) 独立维护 ScoreCard + MetricsCollector 双写</text>
+
+  <!-- ================================================================== -->
+  <!-- SECTION 1: DATA SOURCES -->
+  <!-- ================================================================== -->
+  <text x="60" y="122" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">DATA SOURCES — 两条数据通路</text>
+  <line x1="305" y1="118" x2="1340" y2="118" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Left: Real-time Request -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="140" width="620" height="340" rx="12" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  </g>
+  <circle cx="90" cy="167" r="10" fill="#3b82f6" opacity="0.3"/>
+  <circle cx="90" cy="167" r="5" fill="#3b82f6"/>
+  <text x="108" y="172" fill="#60a5fa" font-size="16" font-weight="700">实时业务请求</text>
+  <text x="455" y="172" fill="#475569" font-size="12">RequestRecorder</text>
+
+  <!-- Success -->
+  <rect x="80" y="190" width="285" height="272" rx="8" fill="#0f1117" fill-opacity="0.5" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="95" y="213" fill="#22c55e" font-size="13" font-weight="600">SUCCESS</text>
+  <rect x="90" y="224" width="265" height="88" rx="6" fill="#0d1520" stroke="#2563eb" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="100" y="241" fill="#60a5fa" font-size="10" font-weight="600">写入 ScoreCard (影响评分)</text>
+  <text x="100" y="258" fill="#cbd5e1" font-size="10">  Scorer.record_success(ttft, tps, duration)</text>
+  <text x="100" y="274" fill="#94a3b8" font-size="9">  → 滑动窗口追加 success 记录</text>
+  <text x="100" y="290" fill="#94a3b8" font-size="9">  → consecutive_failures 重置为 0</text>
+  <text x="100" y="306" fill="#94a3b8" font-size="9">  → 影响: 成功率↑ 稳定性↑ 速度分更新</text>
+  <rect x="90" y="320" width="265" height="130" rx="6" fill="#0d1520" stroke="#06b6d4" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="100" y="337" fill="#22d3ee" font-size="10" font-weight="600">写入 MetricsCollector (可观测性)</text>
+  <circle cx="103" cy="353" r="3" fill="#06b6d4"/><text x="112" y="357" fill="#cbd5e1" font-size="10">llm_request_total  {status="success"}</text>
+  <circle cx="103" cy="371" r="3" fill="#06b6d4"/><text x="112" y="375" fill="#cbd5e1" font-size="10">llm_request_duration_seconds</text>
+  <circle cx="103" cy="389" r="3" fill="#06b6d4"/><text x="112" y="393" fill="#cbd5e1" font-size="10">llm_ttft_seconds</text>
+  <circle cx="103" cy="407" r="3" fill="#06b6d4"/><text x="112" y="411" fill="#cbd5e1" font-size="10">llm_tokens_per_second</text>
+  <circle cx="103" cy="425" r="3" fill="#06b6d4"/><text x="112" y="429" fill="#cbd5e1" font-size="10">llm_input_tokens / output_tokens</text>
+  <text x="100" y="446" fill="#475569" font-size="9">标签: model + provider + label_keys</text>
+
+  <!-- Failure -->
+  <rect x="382" y="190" width="280" height="272" rx="8" fill="#0f1117" fill-opacity="0.5" stroke="#1e3a5f" stroke-width="1"/>
+  <text x="397" y="213" fill="#ef4444" font-size="13" font-weight="600">FAILURE</text>
+  <rect x="392" y="224" width="260" height="88" rx="6" fill="#0d1520" stroke="#2563eb" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="402" y="241" fill="#60a5fa" font-size="10" font-weight="600">写入 ScoreCard (影响评分)</text>
+  <text x="402" y="258" fill="#cbd5e1" font-size="10">  Scorer.record_failure(reason)</text>
+  <text x="402" y="274" fill="#94a3b8" font-size="9">  → 滑动窗口追加 failure 记录</text>
+  <text x="402" y="290" fill="#94a3b8" font-size="9">  → consecutive_failures += 1</text>
+  <text x="402" y="306" fill="#ef4444" font-size="9" opacity="0.8">  → 影响: 成功率↓ 稳定性↓ 可能触发冷却</text>
+  <rect x="392" y="320" width="260" height="80" rx="6" fill="#0d1520" stroke="#06b6d4" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="402" y="337" fill="#22d3ee" font-size="10" font-weight="600">写入 MetricsCollector (可观测性)</text>
+  <circle cx="405" cy="353" r="3" fill="#06b6d4"/><text x="414" y="357" fill="#cbd5e1" font-size="10">llm_request_total  {status="error"}</text>
+  <circle cx="405" cy="371" r="3" fill="#06b6d4"/><text x="414" y="375" fill="#cbd5e1" font-size="10">llm_strategy_triggered_total</text>
+  <text x="402" y="396" fill="#475569" font-size="9">标签: + strategy (触发的策略名)</text>
+  <rect x="392" y="408" width="260" height="46" rx="6" fill="#1a0808" stroke="#ef4444" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="402" y="425" fill="#ef4444" font-size="10" font-weight="600">发送告警 AlertDispatcher</text>
+  <text x="402" y="441" fill="#fca5a5" font-size="9">provider_degraded:{reason}  level=warning</text>
+
+  <!-- Right: Background Probe -->
+  <g filter="url(#shadow)">
+    <rect x="720" y="140" width="620" height="340" rx="12" fill="url(#greenGrad)" stroke="#16a34a" stroke-width="1.5"/>
+  </g>
+  <circle cx="750" cy="167" r="10" fill="#22c55e" opacity="0.3"/>
+  <circle cx="750" cy="167" r="5" fill="#22c55e"/>
+  <text x="768" y="172" fill="#4ade80" font-size="16" font-weight="700">后台健康探测</text>
+  <text x="1160" y="172" fill="#475569" font-size="12">HealthChecker</text>
+
+  <!-- Probe Success -->
+  <rect x="740" y="190" width="280" height="272" rx="8" fill="#0f1117" fill-opacity="0.5" stroke="#1a3d2e" stroke-width="1"/>
+  <text x="755" y="213" fill="#22c55e" font-size="13" font-weight="600">PROBE SUCCESS</text>
+  <text x="755" y="232" fill="#64748b" font-size="10">每 20s, max_tokens=5</text>
+  <rect x="750" y="242" width="260" height="74" rx="6" fill="#0d1520" stroke="#16a34a" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="760" y="259" fill="#4ade80" font-size="10" font-weight="600">写入 ScoreCard (影响评分)</text>
+  <text x="760" y="276" fill="#cbd5e1" font-size="10">  ScoreCard.update_probe(health=True)</text>
+  <text x="760" y="292" fill="#94a3b8" font-size="9">  → health=true, probe_ttft_ms=实测值</text>
+  <text x="760" y="308" fill="#94a3b8" font-size="9">  → 影响: 健康门控通过, 冷启动速度分</text>
+  <rect x="750" y="324" width="260" height="80" rx="6" fill="#0d1520" stroke="#06b6d4" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="760" y="341" fill="#22d3ee" font-size="10" font-weight="600">写入 MetricsCollector (可观测性)</text>
+  <circle cx="763" cy="357" r="3" fill="#06b6d4"/><text x="772" y="361" fill="#cbd5e1" font-size="10">llm_provider_health = 1</text>
+  <circle cx="763" cy="375" r="3" fill="#06b6d4"/><text x="772" y="379" fill="#cbd5e1" font-size="10">llm_probe_ttft_seconds</text>
+  <circle cx="763" cy="393" r="3" fill="#06b6d4"/><text x="772" y="397" fill="#cbd5e1" font-size="10">llm_probe_total  {status="success"}</text>
+
+  <!-- Probe Failure -->
+  <rect x="1040" y="190" width="280" height="272" rx="8" fill="#0f1117" fill-opacity="0.5" stroke="#1a3d2e" stroke-width="1"/>
+  <text x="1055" y="213" fill="#ef4444" font-size="13" font-weight="600">PROBE FAILURE</text>
+  <text x="1055" y="232" fill="#64748b" font-size="10">超时 / 异常</text>
+  <rect x="1050" y="242" width="260" height="74" rx="6" fill="#0d1520" stroke="#16a34a" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="1060" y="259" fill="#4ade80" font-size="10" font-weight="600">写入 ScoreCard (影响评分)</text>
+  <text x="1060" y="276" fill="#cbd5e1" font-size="10">  ScoreCard.update_probe(health=False)</text>
+  <text x="1060" y="292" fill="#ef4444" font-size="9" opacity="0.8">  → health=false → 健康门控拦截</text>
+  <text x="1060" y="308" fill="#ef4444" font-size="9" opacity="0.8">  → score=0, 提供商被完全排除</text>
+  <rect x="1050" y="324" width="260" height="62" rx="6" fill="#0d1520" stroke="#06b6d4" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="1060" y="341" fill="#22d3ee" font-size="10" font-weight="600">写入 MetricsCollector (可观测性)</text>
+  <circle cx="1063" cy="357" r="3" fill="#06b6d4"/><text x="1072" y="361" fill="#cbd5e1" font-size="10">llm_provider_health = 0</text>
+  <circle cx="1063" cy="375" r="3" fill="#06b6d4"/><text x="1072" y="379" fill="#cbd5e1" font-size="10">llm_probe_total  {status="error"}</text>
+  <rect x="1050" y="394" width="260" height="46" rx="6" fill="#1a0808" stroke="#ef4444" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="1060" y="411" fill="#ef4444" font-size="10" font-weight="600">发送告警 AlertDispatcher</text>
+  <text x="1060" y="427" fill="#fca5a5" font-size="9">probe_failed  level=warning</text>
+
+  <!-- ================================================================== -->
+  <!-- Arrows to ScoreCard -->
+  <!-- ================================================================== -->
+  <path d="M 340 480 L 340 530 Q 340 545 354 545 L 478 545" stroke="#3b82f6" stroke-width="2" fill="none" marker-end="url(#arrowBlueM)" stroke-dasharray="6,3"/>
+  <text x="356" y="522" fill="#3b82f6" font-size="10" font-weight="600">写入滑动窗口</text>
+  <path d="M 1020 480 L 1020 530 Q 1020 545 1006 545 L 910 545" stroke="#22c55e" stroke-width="2" fill="none" marker-end="url(#arrowGreenM)" stroke-dasharray="6,3"/>
+  <text x="938" y="522" fill="#22c55e" font-size="10" font-weight="600">写入探测数据</text>
+
+  <!-- ================================================================== -->
+  <!-- SECTION 2: SCORE CARD -->
+  <!-- ================================================================== -->
+  <text x="60" y="530" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">SCORE CARD</text>
+  <line x1="165" y1="526" x2="395" y2="526" stroke="#1e293b" stroke-width="1"/>
+
+  <g filter="url(#shadow)">
+    <rect x="480" y="520" width="430" height="260" rx="14" fill="url(#scoreCardGrad)" stroke="#334155" stroke-width="2"/>
+  </g>
+  <rect x="590" y="530" width="210" height="30" rx="15" fill="#334155"/>
+  <text x="695" y="550" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="700">ScoreCard</text>
+  <text x="695" y="573" text-anchor="middle" fill="#64748b" font-size="11">每个 (model x provider) 独立一份</text>
+
+  <rect x="500" y="587" width="190" height="176" rx="8" fill="#1e293b" stroke="#2563eb" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="510" y="608" fill="#60a5fa" font-size="12" font-weight="600">来自实时请求</text>
+  <line x1="510" y1="615" x2="680" y2="615" stroke="#2563eb" stroke-width="0.5" opacity="0.3"/>
+  <text x="515" y="635" fill="#94a3b8" font-size="11">滑动窗口</text>
+  <text x="515" y="651" fill="#cbd5e1" font-size="10">  最近 20 条 / 300 秒</text>
+  <text x="515" y="667" fill="#cbd5e1" font-size="10">  每条: success, ttft, tps</text>
+  <line x1="515" y1="677" x2="680" y2="677" stroke="#1e3a5f" stroke-width="0.5"/>
+  <text x="515" y="695" fill="#94a3b8" font-size="11">consecutive_failures</text>
+  <text x="515" y="711" fill="#cbd5e1" font-size="10">  成功→0, 失败→累加</text>
+  <line x1="515" y1="721" x2="680" y2="721" stroke="#1e3a5f" stroke-width="0.5"/>
+  <text x="515" y="739" fill="#94a3b8" font-size="11">last_failure_time</text>
+  <text x="515" y="755" fill="#cbd5e1" font-size="10">  冷却倒计时判断</text>
+
+  <rect x="705" y="587" width="185" height="176" rx="8" fill="#1e293b" stroke="#16a34a" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="715" y="608" fill="#4ade80" font-size="12" font-weight="600">来自后台探测</text>
+  <line x1="715" y1="615" x2="880" y2="615" stroke="#16a34a" stroke-width="0.5" opacity="0.3"/>
+  <text x="720" y="635" fill="#94a3b8" font-size="11">health</text>
+  <text x="720" y="651" fill="#cbd5e1" font-size="10">  true / false</text>
+  <text x="720" y="667" fill="#cbd5e1" font-size="10">  控制健康门控</text>
+  <line x1="720" y1="677" x2="880" y2="677" stroke="#1a3d2e" stroke-width="0.5"/>
+  <text x="720" y="695" fill="#94a3b8" font-size="11">probe_ttft_ms</text>
+  <text x="720" y="711" fill="#cbd5e1" font-size="10">  冷启动/混合时用</text>
+  <line x1="720" y1="721" x2="880" y2="721" stroke="#1a3d2e" stroke-width="0.5"/>
+  <text x="720" y="739" fill="#94a3b8" font-size="11">probe_time</text>
+  <text x="720" y="755" fill="#cbd5e1" font-size="10">  最近探测时间</text>
+
+  <!-- ================================================================== -->
+  <!-- Arrow ScoreCard → Scorer -->
+  <!-- ================================================================== -->
+  <path d="M 695 780 L 695 830" stroke="#f59e0b" stroke-width="2.5" fill="none" marker-end="url(#arrowOrangeM)"/>
+  <text x="710" y="812" fill="#f59e0b" font-size="10">读取评分</text>
+
+  <!-- ================================================================== -->
+  <!-- SECTION 3: SCORER -->
+  <!-- ================================================================== -->
+  <text x="60" y="840" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">SCORER</text>
+  <line x1="120" y1="836" x2="1340" y2="836" stroke="#1e293b" stroke-width="1"/>
+
+  <g filter="url(#shadow)">
+    <rect x="300" y="845" width="790" height="350" rx="14" fill="#1c1c1c" stroke="#f59e0b" stroke-width="1.5" stroke-opacity="0.6"/>
+  </g>
+  <rect x="545" y="853" width="300" height="34" rx="17" fill="url(#scorerGrad)"/>
+  <text x="695" y="875" text-anchor="middle" fill="#1c1c1c" font-size="15" font-weight="700">Scorer.rank_providers()</text>
+
+  <text x="330" y="913" fill="#ef4444" font-size="14" font-weight="700">STEP 1  健康门控</text>
+  <text x="330" y="933" fill="#94a3b8" font-size="11">任一条件不满足 → score = 0, 提供商直接排除</text>
+  <rect x="330" y="945" width="340" height="52" rx="6" fill="#1a0a0a" stroke="#ef4444" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="345" y="965" fill="#fca5a5" font-size="12">health == false</text>
+  <text x="345" y="983" fill="#64748b" font-size="10">来自最近一次后台探测</text>
+  <text x="598" y="973" fill="#ef4444" font-size="12" font-weight="600">→ 排除</text>
+  <rect x="690" y="945" width="380" height="52" rx="6" fill="#1a0a0a" stroke="#ef4444" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="705" y="965" fill="#fca5a5" font-size="12">consecutive_failures >= 3  且  冷却未过</text>
+  <text x="705" y="983" fill="#64748b" font-size="10">来自实时请求连续失败, cooldown=60s</text>
+  <text x="998" y="973" fill="#ef4444" font-size="12" font-weight="600">→ 排除</text>
+
+  <text x="330" y="1025" fill="#f59e0b" font-size="14" font-weight="700">STEP 2  四维复合评分</text>
+  <rect x="330" y="1039" width="740" height="30" rx="6" fill="#1a1500" stroke="#f59e0b" stroke-width="0.5" stroke-opacity="0.3"/>
+  <text x="695" y="1059" text-anchor="middle" fill="#fbbf24" font-size="13" font-weight="600" font-family="monospace">Score = 0.25 x Priority + 0.30 x Speed + 0.35 x SuccessRate + 0.10 x Stability</text>
+
+  <rect x="330" y="1081" width="170" height="96" rx="8" fill="#1e293b" stroke="#8b5cf6" stroke-width="1"/>
+  <text x="345" y="1103" fill="#a78bfa" font-size="12" font-weight="700">优先级 (25%)</text>
+  <text x="345" y="1123" fill="#cbd5e1" font-size="10">1 / priority</text>
+  <line x1="345" y1="1133" x2="488" y2="1133" stroke="#334155" stroke-width="0.5"/>
+  <text x="345" y="1151" fill="#64748b" font-size="10">来源: 配置文件</text>
+  <text x="345" y="1167" fill="#64748b" font-size="10">priority=1 → 1.0</text>
+
+  <rect x="515" y="1081" width="190" height="96" rx="8" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="530" y="1103" fill="#60a5fa" font-size="12" font-weight="700">速度 (30%)</text>
+  <text x="530" y="1123" fill="#cbd5e1" font-size="10">1 / (1 + TTFT)</text>
+  <line x1="530" y1="1133" x2="693" y2="1133" stroke="#334155" stroke-width="0.5"/>
+  <text x="530" y="1151" fill="#3b82f6" font-size="10">来源: 实时请求 TTFT</text>
+  <text x="530" y="1167" fill="#22c55e" font-size="10">兜底: 探测 TTFT</text>
+
+  <rect x="720" y="1081" width="185" height="96" rx="8" fill="#1e293b" stroke="#22c55e" stroke-width="1"/>
+  <text x="735" y="1103" fill="#4ade80" font-size="12" font-weight="700">成功率 (35%)</text>
+  <text x="735" y="1123" fill="#cbd5e1" font-size="10">成功数 / 总数</text>
+  <line x1="735" y1="1133" x2="893" y2="1133" stroke="#334155" stroke-width="0.5"/>
+  <text x="735" y="1151" fill="#3b82f6" font-size="10">来源: 滑动窗口 (300s)</text>
+  <text x="735" y="1167" fill="#64748b" font-size="10">权重最大的维度</text>
+
+  <rect x="920" y="1081" width="150" height="96" rx="8" fill="#1e293b" stroke="#f97316" stroke-width="1"/>
+  <text x="935" y="1103" fill="#fb923c" font-size="12" font-weight="700">稳定性 (10%)</text>
+  <text x="935" y="1123" fill="#cbd5e1" font-size="10">1 - failures / 3</text>
+  <line x1="935" y1="1133" x2="1058" y2="1133" stroke="#334155" stroke-width="0.5"/>
+  <text x="935" y="1151" fill="#3b82f6" font-size="10">来源: 连续失败数</text>
+  <text x="935" y="1167" fill="#64748b" font-size="10">惩罚恶化中的提供商</text>
+
+  <!-- ================================================================== -->
+  <!-- Scorer → Ranking → Execution → Next Request (same as before) -->
+  <!-- ================================================================== -->
+  <path d="M 695 1195 L 695 1235" stroke="#f59e0b" stroke-width="2.5" fill="none" marker-end="url(#arrowOrangeM)"/>
+  <text x="710" y="1221" fill="#f59e0b" font-size="10">输出排序</text>
+
+  <!-- PROVIDER RANKING -->
+  <text x="60" y="1245" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">PROVIDER RANKING</text>
+  <line x1="220" y1="1241" x2="1340" y2="1241" stroke="#1e293b" stroke-width="1"/>
+  <g filter="url(#shadow)"><rect x="320" y="1251" width="750" height="72" rx="12" fill="#1c2333" stroke="#334155" stroke-width="1.5"/></g>
+  <text x="350" y="1278" fill="#94a3b8" font-size="12">排序结果</text>
+  <rect x="440" y="1261" width="155" height="48" rx="8" fill="#064e3b" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="517" y="1281" text-anchor="middle" fill="#22c55e" font-size="14" font-weight="700">Provider A</text>
+  <text x="517" y="1299" text-anchor="middle" fill="#4ade80" font-size="12">score = 0.85</text>
+  <text x="608" y="1289" fill="#475569" font-size="16">&gt;</text>
+  <rect x="625" y="1261" width="155" height="48" rx="8" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="702" y="1281" text-anchor="middle" fill="#60a5fa" font-size="14" font-weight="600">Provider B</text>
+  <text x="702" y="1299" text-anchor="middle" fill="#94a3b8" font-size="12">score = 0.59</text>
+  <text x="793" y="1289" fill="#475569" font-size="16">&gt;</text>
+  <rect x="810" y="1261" width="155" height="48" rx="8" fill="#1a0a0a" stroke="#ef4444" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="887" y="1281" text-anchor="middle" fill="#ef4444" font-size="14">Provider C</text>
+  <text x="887" y="1299" text-anchor="middle" fill="#64748b" font-size="11">score = 0 (排除)</text>
+
+  <path d="M 695 1323 L 695 1368" stroke="#a855f7" stroke-width="2.5" fill="none" marker-end="url(#arrowPurpleM)"/>
+  <text x="710" y="1352" fill="#a855f7" font-size="10">发起请求</text>
+
+  <!-- REQUEST EXECUTION -->
+  <text x="60" y="1371" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">REQUEST EXECUTION</text>
+  <line x1="230" y1="1367" x2="1340" y2="1367" stroke="#1e293b" stroke-width="1"/>
+  <g filter="url(#shadow)"><rect x="200" y="1380" width="990" height="220" rx="14" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/></g>
+  <text x="230" y="1410" fill="#c4b5fd" font-size="16" font-weight="700">Engine 执行本次请求</text>
+  <rect x="230" y="1425" width="165" height="54" rx="8" fill="#1e1030" stroke="#7c3aed" stroke-width="1"/>
+  <text x="312" y="1448" text-anchor="middle" fill="#c4b5fd" font-size="12" font-weight="600">选中 Provider A</text>
+  <text x="312" y="1466" text-anchor="middle" fill="#64748b" font-size="10">score 最高</text>
+  <path d="M 395 1452 L 430 1452" stroke="#7c3aed" stroke-width="1.5" fill="none" marker-end="url(#arrowPurpleM)"/>
+  <rect x="430" y="1425" width="140" height="54" rx="8" fill="#1e1030" stroke="#7c3aed" stroke-width="1"/>
+  <text x="500" y="1448" text-anchor="middle" fill="#c4b5fd" font-size="12" font-weight="600">发起 LLM 请求</text>
+  <text x="500" y="1466" text-anchor="middle" fill="#64748b" font-size="10">超时=60s</text>
+  <path d="M 570 1438 L 620 1438" stroke="#22c55e" stroke-width="1.5" fill="none" marker-end="url(#arrowGreenM)"/>
+  <text x="590" y="1430" fill="#22c55e" font-size="9">成功</text>
+  <rect x="620" y="1418" width="228" height="40" rx="8" fill="#0a1a0f" stroke="#22c55e" stroke-width="1"/>
+  <text x="734" y="1443" text-anchor="middle" fill="#4ade80" font-size="11">record_success → ScoreCard + Metrics</text>
+  <path d="M 570 1466 L 620 1466" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#arrowRedM)"/>
+  <text x="590" y="1484" fill="#ef4444" font-size="9">失败</text>
+  <rect x="620" y="1468" width="228" height="40" rx="8" fill="#1a0a0a" stroke="#ef4444" stroke-width="1"/>
+  <text x="734" y="1493" text-anchor="middle" fill="#fca5a5" font-size="11">record_failure → ScoreCard + Metrics + Alert</text>
+  <path d="M 848 1488 Q 900 1488 900 1520 L 900 1538 Q 900 1552 886 1552 L 270 1552 Q 252 1552 252 1538 L 252 1510" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#arrowRedM)" stroke-dasharray="5,3"/>
+  <text x="570" y="1570" fill="#ef4444" font-size="11" text-anchor="middle">切换到 Provider B 重试（同样流程）</text>
+  <path d="M 848 1438 L 1060 1438" stroke="#22c55e" stroke-width="1.5" fill="none" marker-end="url(#arrowGreenM)"/>
+  <rect x="1060" y="1418" width="110" height="40" rx="8" fill="#064e3b" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="1115" y="1443" text-anchor="middle" fill="#22c55e" font-size="13" font-weight="700">返回结果</text>
+
+  <path d="M 695 1600 L 695 1648" stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#arrowWhiteM)" stroke-dasharray="6,4"/>
+
+  <!-- NEXT REQUEST -->
+  <text x="60" y="1648" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">NEXT REQUEST</text>
+  <line x1="175" y1="1644" x2="1340" y2="1644" stroke="#1e293b" stroke-width="1"/>
+  <g filter="url(#shadow)"><rect x="200" y="1658" width="990" height="170" rx="14" fill="url(#orangeGrad)" stroke="#d97706" stroke-width="1.5"/></g>
+  <text x="230" y="1688" fill="#fbbf24" font-size="16" font-weight="700">下一次请求：评分已被更新</text>
+  <text x="230" y="1708" fill="#94a3b8" font-size="12">Scorer.rank_providers() 重新读取 ScoreCard，排序结果可能发生变化</text>
+  <rect x="230" y="1723" width="300" height="88" rx="8" fill="#1a1500" stroke="#f59e0b" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="245" y="1747" fill="#fbbf24" font-size="12" font-weight="600">如果 Provider A 刚才失败了</text>
+  <text x="245" y="1767" fill="#cbd5e1" font-size="11">  A 的成功率下降、稳定性分下降</text>
+  <text x="245" y="1785" fill="#cbd5e1" font-size="11">  B 可能超越 A 成为首选</text>
+  <text x="245" y="1803" fill="#64748b" font-size="10">  B(0.72) > A(0.68) → 选 B</text>
+  <rect x="550" y="1723" width="300" height="88" rx="8" fill="#0a1a0f" stroke="#22c55e" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="565" y="1747" fill="#4ade80" font-size="12" font-weight="600">如果 Provider A 成功了</text>
+  <text x="565" y="1767" fill="#cbd5e1" font-size="11">  A 的成功率维持、实际 TTFT 被记录</text>
+  <text x="565" y="1785" fill="#cbd5e1" font-size="11">  A 继续保持最优排名</text>
+  <text x="565" y="1803" fill="#64748b" font-size="10">  A(0.85) > B(0.59) → 继续选 A</text>
+  <rect x="870" y="1723" width="300" height="88" rx="8" fill="#1a0a0a" stroke="#ef4444" stroke-width="1" stroke-opacity="0.5"/>
+  <text x="885" y="1747" fill="#fca5a5" font-size="12" font-weight="600">如果 A 连续失败 3 次</text>
+  <text x="885" y="1767" fill="#cbd5e1" font-size="11">  触发冷却, score=0, 60s 内被排除</text>
+  <text x="885" y="1785" fill="#cbd5e1" font-size="11">  仅 B 可用, 直到冷却结束或探测恢复</text>
+  <text x="885" y="1803" fill="#64748b" font-size="10">  B(0.59) → 唯一选项</text>
+
+  <!-- TTFT MIXING -->
+  <text x="60" y="1880" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">TTFT MIXING STRATEGY</text>
+  <line x1="255" y1="1876" x2="1340" y2="1876" stroke="#1e293b" stroke-width="1"/>
+  <g filter="url(#shadow)"><rect x="60" y="1892" width="1280" height="115" rx="12" fill="#1c2333" stroke="#334155" stroke-width="1"/></g>
+  <text x="90" y="1920" fill="#60a5fa" font-size="13" font-weight="600">速度分 TTFT 取值：随实际请求量渐进过渡</text>
+  <rect x="90" y="1933" width="270" height="58" rx="6" fill="#0f1117" stroke="#22c55e" stroke-width="1"/>
+  <text x="105" y="1955" fill="#4ade80" font-size="11" font-weight="600">实际请求 >= 10 条</text>
+  <text x="105" y="1974" fill="#cbd5e1" font-size="10">100% 实际 TTFT, 忽略探测</text>
+  <text x="372" y="1964" fill="#475569" font-size="14">→</text>
+  <rect x="388" y="1933" width="270" height="58" rx="6" fill="#0f1117" stroke="#3b82f6" stroke-width="1"/>
+  <text x="403" y="1955" fill="#60a5fa" font-size="11" font-weight="600">1~9 条 + 有探测数据</text>
+  <text x="403" y="1974" fill="#cbd5e1" font-size="10">加权混合: w*实际 + (1-w)*探测</text>
+  <text x="670" y="1964" fill="#475569" font-size="14">→</text>
+  <rect x="686" y="1933" width="270" height="58" rx="6" fill="#0f1117" stroke="#a855f7" stroke-width="1"/>
+  <text x="701" y="1955" fill="#c4b5fd" font-size="11" font-weight="600">0 条 + 有探测数据</text>
+  <text x="701" y="1974" fill="#cbd5e1" font-size="10">100% 探测 TTFT (冷启动)</text>
+  <text x="968" y="1964" fill="#475569" font-size="14">→</text>
+  <rect x="984" y="1933" width="270" height="58" rx="6" fill="#0f1117" stroke="#64748b" stroke-width="1"/>
+  <text x="999" y="1955" fill="#94a3b8" font-size="11" font-weight="600">无任何数据</text>
+  <text x="999" y="1974" fill="#cbd5e1" font-size="10">默认 0.5 (新提供商兜底)</text>
+
+  <!-- ================================================================== -->
+  <!-- ================================================================== -->
+  <!-- MONITORING PLATFORM SECTION -->
+  <!-- ================================================================== -->
+  <!-- ================================================================== -->
+
+  <line x1="60" y1="2040" x2="1340" y2="2040" stroke="#334155" stroke-width="2" stroke-dasharray="8,4"/>
+  <rect x="530" y="2028" width="340" height="26" rx="13" fill="#0f1117" stroke="#334155" stroke-width="1"/>
+  <text x="700" y="2046" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="600">外部监控平台交互 — 指标通路 + 告警通路</text>
+
+  <!-- ================================================================== -->
+  <!-- Two-lane layout label -->
+  <!-- ================================================================== -->
+  <text x="60" y="2090" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">METRICS PIPELINE (指标通路)</text>
+  <line x1="310" y1="2086" x2="660" y2="2086" stroke="#1e293b" stroke-width="1"/>
+  <text x="740" y="2090" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">ALERT PIPELINE (告警通路)</text>
+  <line x1="985" y1="2086" x2="1340" y2="2086" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ================================================================== -->
+  <!-- LEFT LANE: Metrics Pipeline -->
+  <!-- Clean top-down: MetricsCollector → Backend → Prometheus → Grafana -->
+  <!-- ================================================================== -->
+
+  <!-- ROW 1: MetricsCollector -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="2108" width="620" height="100" rx="12" fill="url(#cyanGrad)" stroke="#0891b2" stroke-width="1.5"/>
+  </g>
+  <text x="90" y="2138" fill="#22d3ee" font-size="16" font-weight="700">MetricsCollector</text>
+  <text x="320" y="2138" fill="#64748b" font-size="11">3 个泛型方法: inc() / observe() / set()</text>
+  <text x="90" y="2162" fill="#94a3b8" font-size="10">接收来自 RequestRecorder (8 个请求级指标) + HealthChecker (4 个系统级指标) + Scorer (llm_provider_score) 的全部数据</text>
+  <text x="90" y="2180" fill="#64748b" font-size="10">共 12 个 MetricDef, 通过 ALL_METRICS 注册表声明, 后端自动注册</text>
+
+  <!-- Branch arrows -->
+  <path d="M 220 2208 L 220 2250" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#arrowWhiteM)"/>
+  <text x="145" y="2238" fill="#475569" font-size="10">开发/测试</text>
+  <path d="M 450 2208 L 450 2250" stroke="#e65100" stroke-width="2" fill="none" marker-end="url(#arrowPromM)"/>
+  <text x="395" y="2238" fill="#e65100" font-size="10">生产环境</text>
+
+  <!-- ROW 2: Two backends side by side -->
+  <!-- SimpleCollector -->
+  <g filter="url(#shadow)">
+    <rect x="80" y="2255" width="270" height="70" rx="10" fill="#1c2333" stroke="#475569" stroke-width="1"/>
+  </g>
+  <text x="215" y="2282" text-anchor="middle" fill="#94a3b8" font-size="14" font-weight="600">SimpleCollector</text>
+  <text x="215" y="2302" text-anchor="middle" fill="#64748b" font-size="10">内存字典, 零依赖, get_summary() 调试</text>
+  <!-- Dead end label -->
+  <text x="215" y="2340" text-anchor="middle" fill="#475569" font-size="10" font-style="italic">无外部输出 (进程内查询)</text>
+
+  <!-- PrometheusCollector -->
+  <g filter="url(#shadow)">
+    <rect x="380" y="2255" width="270" height="70" rx="10" fill="#1c1c1c" stroke="#e65100" stroke-width="1.5"/>
+  </g>
+  <text x="515" y="2282" text-anchor="middle" fill="#fb923c" font-size="14" font-weight="600">PrometheusCollector</text>
+  <text x="515" y="2302" text-anchor="middle" fill="#64748b" font-size="10">自动注册 ALL_METRICS, 暴露 /metrics :9091</text>
+
+  <!-- Arrow down to Prometheus -->
+  <path d="M 515 2325 L 515 2370" stroke="#e65100" stroke-width="2.5" fill="none" marker-end="url(#arrowPromM)"/>
+  <text x="530" y="2356" fill="#e65100" font-size="10">HTTP pull (scrape)</text>
+
+  <!-- ROW 3: Prometheus -->
+  <g filter="url(#shadow)">
+    <rect x="350" y="2375" width="330" height="80" rx="12" fill="#1a0c00" stroke="#e65100" stroke-width="2"/>
+  </g>
+  <circle cx="385" cy="2415" r="18" fill="none" stroke="#e65100" stroke-width="2"/>
+  <path d="M 385 2402 L 385 2415 L 394 2420" stroke="#e65100" stroke-width="2" fill="none"/>
+  <text x="415" y="2408" fill="#fb923c" font-size="18" font-weight="700">Prometheus</text>
+  <text x="415" y="2428" fill="#94a3b8" font-size="11">时序数据库 — 存储所有指标</text>
+  <text x="415" y="2446" fill="#64748b" font-size="10">scrape_interval: 15s | 持久化 + 查询</text>
+
+  <!-- Arrow down to Grafana -->
+  <path d="M 515 2455 L 515 2500" stroke="#f46800" stroke-width="2.5" fill="none" marker-end="url(#arrowOrangeM)"/>
+  <text x="530" y="2486" fill="#f46800" font-size="10">PromQL 查询</text>
+
+  <!-- ROW 4: Grafana -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="2505" width="620" height="90" rx="12" fill="#1a1000" stroke="#f46800" stroke-width="2"/>
+  </g>
+  <rect x="82" y="2522" width="26" height="26" rx="5" fill="#f46800"/>
+  <rect x="86" y="2530" width="4" height="14" rx="1" fill="#1a1000"/>
+  <rect x="93" y="2526" width="4" height="18" rx="1" fill="#1a1000"/>
+  <rect x="100" y="2533" width="4" height="11" rx="1" fill="#1a1000"/>
+  <text x="118" y="2542" fill="#f59e0b" font-size="18" font-weight="700">Grafana</text>
+  <text x="250" y="2542" fill="#94a3b8" font-size="11">可视化仪表盘 — 运维 / 值班人员实时查看</text>
+
+  <!-- Dashboard panels inline -->
+  <rect x="80" y="2560" width="115" height="24" rx="4" fill="#0a1a0f" stroke="#22c55e" stroke-width="0.8"/>
+  <text x="137" y="2576" text-anchor="middle" fill="#4ade80" font-size="9">请求成功率</text>
+  <rect x="202" y="2560" width="115" height="24" rx="4" fill="#0d1520" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="259" y="2576" text-anchor="middle" fill="#60a5fa" font-size="9">P99 TTFT</text>
+  <rect x="324" y="2560" width="115" height="24" rx="4" fill="#1e1030" stroke="#a855f7" stroke-width="0.8"/>
+  <text x="381" y="2576" text-anchor="middle" fill="#c4b5fd" font-size="9">Token 消耗</text>
+  <rect x="446" y="2560" width="115" height="24" rx="4" fill="#1a1500" stroke="#f59e0b" stroke-width="0.8"/>
+  <text x="503" y="2576" text-anchor="middle" fill="#fbbf24" font-size="9">提供商评分</text>
+  <rect x="568" y="2560" width="95" height="24" rx="4" fill="#1a0808" stroke="#ef4444" stroke-width="0.8"/>
+  <text x="615" y="2576" text-anchor="middle" fill="#fca5a5" font-size="9">降级事件</text>
+
+  <!-- Grafana → Grafana Alerting bridge -->
+  <path d="M 680 2550 L 735 2550" stroke="#f46800" stroke-width="1.5" fill="none" marker-end="url(#arrowOrangeM)" stroke-dasharray="4,3"/>
+
+  <!-- ================================================================== -->
+  <!-- RIGHT LANE: Alert Pipeline -->
+  <!-- Clean top-down: AlertDispatcher → Rules → Channels → Destinations -->
+  <!-- ================================================================== -->
+
+  <!-- ROW 1: AlertDispatcher -->
+  <g filter="url(#shadow)">
+    <rect x="740" y="2108" width="600" height="100" rx="12" fill="url(#alertRedGrad)" stroke="#dc2626" stroke-width="1.5"/>
+  </g>
+  <text x="770" y="2138" fill="#fca5a5" font-size="16" font-weight="700">AlertDispatcher</text>
+  <text x="970" y="2138" fill="#64748b" font-size="11">异步队列消费, 后台任务</text>
+  <text x="770" y="2162" fill="#94a3b8" font-size="10">触发源: RequestRecorder (provider_degraded) | HealthChecker (probe_failed) | Engine (all_exhausted)</text>
+  <text x="770" y="2180" fill="#64748b" font-size="10">每个 AlertEvent 包含: level, title, message, provider, model, timestamp</text>
+
+  <!-- Arrow down to Rules -->
+  <path d="M 1040 2208 L 1040 2252" stroke="#ef4444" stroke-width="2" fill="none" marker-end="url(#arrowRedM)"/>
+
+  <!-- ROW 2: AlertRules -->
+  <g filter="url(#shadow)">
+    <rect x="860" y="2255" width="360" height="70" rx="10" fill="#1c1c1c" stroke="#ef4444" stroke-width="1" stroke-opacity="0.6"/>
+  </g>
+  <text x="1040" y="2282" text-anchor="middle" fill="#fca5a5" font-size="14" font-weight="600">AlertRules — 去重与静默</text>
+  <text x="1040" y="2302" text-anchor="middle" fill="#64748b" font-size="10">key = (title, provider) | silence_seconds = 60s | 同一 key 窗口内只发第一次</text>
+
+  <!-- Arrow down to channels fan-out -->
+  <path d="M 1040 2325 L 1040 2370" stroke="#ef4444" stroke-width="2" fill="none" marker-end="url(#arrowRedM)"/>
+
+  <!-- ROW 3: Three channels -->
+  <!-- Log -->
+  <g filter="url(#shadow)">
+    <rect x="740" y="2375" width="180" height="80" rx="10" fill="#1c2333" stroke="#475569" stroke-width="1"/>
+  </g>
+  <rect x="758" y="2391" width="38" height="18" rx="4" fill="#334155"/>
+  <text x="777" y="2404" text-anchor="middle" fill="#94a3b8" font-size="9" font-weight="600">LOG</text>
+  <text x="803" y="2404" fill="#94a3b8" font-size="12" font-weight="600">日志通道</text>
+  <text x="758" y="2426" fill="#cbd5e1" font-size="10">Python logging</text>
+  <text x="758" y="2442" fill="#64748b" font-size="9">默认兜底, 始终启用</text>
+
+  <!-- Feishu -->
+  <g filter="url(#shadow)">
+    <rect x="940" y="2375" width="180" height="80" rx="10" fill="#1c2333" stroke="#3b82f6" stroke-width="1"/>
+  </g>
+  <rect x="958" y="2391" width="55" height="18" rx="4" fill="#1e3a5f"/>
+  <text x="985" y="2404" text-anchor="middle" fill="#60a5fa" font-size="9" font-weight="600">FEISHU</text>
+  <text x="1018" y="2404" fill="#60a5fa" font-size="12" font-weight="600">飞书</text>
+  <text x="958" y="2426" fill="#cbd5e1" font-size="10">POST Webhook</text>
+  <text x="958" y="2442" fill="#64748b" font-size="9">msg_type: text</text>
+
+  <!-- Webhook -->
+  <g filter="url(#shadow)">
+    <rect x="1140" y="2375" width="200" height="80" rx="10" fill="#1c2333" stroke="#22c55e" stroke-width="1"/>
+  </g>
+  <rect x="1158" y="2391" width="68" height="18" rx="4" fill="#1a3d2e"/>
+  <text x="1192" y="2404" text-anchor="middle" fill="#4ade80" font-size="9" font-weight="600">WEBHOOK</text>
+  <text x="1233" y="2404" fill="#4ade80" font-size="12" font-weight="600">通用</text>
+  <text x="1158" y="2426" fill="#cbd5e1" font-size="10">POST JSON</text>
+  <text x="1158" y="2442" fill="#64748b" font-size="9">AlertEvent 全量字段</text>
+
+  <!-- Fan-out arrows from rules to 3 channels -->
+  <path d="M 960 2350 L 830 2375" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#arrowRedM)"/>
+  <path d="M 1040 2350 L 1030 2375" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#arrowRedM)"/>
+  <path d="M 1120 2350 L 1240 2375" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#arrowRedM)"/>
+
+  <!-- ROW 4: Destinations -->
+  <path d="M 830 2455 L 830 2500" stroke="#475569" stroke-width="1.5" fill="none" marker-end="url(#arrowWhiteM)"/>
+  <path d="M 1030 2455 L 1030 2500" stroke="#3b82f6" stroke-width="1.5" fill="none" marker-end="url(#arrowBlueM)"/>
+  <path d="M 1240 2455 L 1240 2500" stroke="#22c55e" stroke-width="1.5" fill="none" marker-end="url(#arrowGreenM)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="740" y="2505" width="180" height="52" rx="8" fill="#1e293b" stroke="#475569" stroke-width="1"/>
+  </g>
+  <text x="830" y="2530" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="600">应用日志</text>
+  <text x="830" y="2548" text-anchor="middle" fill="#64748b" font-size="9">本地排查 / ELK</text>
+
+  <g filter="url(#shadow)">
+    <rect x="940" y="2505" width="180" height="52" rx="8" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  </g>
+  <text x="1030" y="2530" text-anchor="middle" fill="#60a5fa" font-size="12" font-weight="600">飞书群</text>
+  <text x="1030" y="2548" text-anchor="middle" fill="#64748b" font-size="9">运维 / 值班人员</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1140" y="2505" width="200" height="52" rx="8" fill="#1e293b" stroke="#22c55e" stroke-width="1"/>
+  </g>
+  <text x="1240" y="2530" text-anchor="middle" fill="#4ade80" font-size="12" font-weight="600">告警平台</text>
+  <text x="1240" y="2548" text-anchor="middle" fill="#64748b" font-size="9">PagerDuty / 企微 / 钉钉</text>
+
+  <!-- ================================================================== -->
+  <!-- BRIDGE: Grafana Alerting connects both lanes -->
+  <!-- ================================================================== -->
+  <g filter="url(#shadow)">
+    <rect x="735" y="2570" width="220" height="60" rx="10" fill="#1a1000" stroke="#f46800" stroke-width="1.5"/>
+  </g>
+  <text x="845" y="2595" text-anchor="middle" fill="#f59e0b" font-size="13" font-weight="600">Grafana Alerting</text>
+  <text x="845" y="2614" text-anchor="middle" fill="#64748b" font-size="9">基于 PromQL 规则二次告警 (如: 成功率 &lt; 80% 持续 5m)</text>
+
+  <!-- Arrow from Grafana Alerting to Feishu/Webhook destinations -->
+  <path d="M 955 2595 L 1030 2557" stroke="#f46800" stroke-width="1.5" fill="none" marker-end="url(#arrowOrangeM)" stroke-dasharray="4,3"/>
+  <path d="M 955 2600 L 1240 2557" stroke="#f46800" stroke-width="1.5" fill="none" marker-end="url(#arrowOrangeM)" stroke-dasharray="4,3"/>
+
+  <!-- ================================================================== -->
+  <!-- SUMMARY: Two pipeline comparison -->
+  <!-- ================================================================== -->
+  <text x="60" y="2680" fill="#94a3b8" font-size="13" font-weight="600" letter-spacing="1">PIPELINE SUMMARY</text>
+  <line x1="220" y1="2676" x2="1340" y2="2676" stroke="#1e293b" stroke-width="1"/>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="2695" width="620" height="190" rx="12" fill="#0d1520" stroke="#06b6d4" stroke-width="1"/>
+  </g>
+  <text x="90" y="2722" fill="#22d3ee" font-size="14" font-weight="700">指标通路 (Metrics Pipeline)</text>
+  <text x="90" y="2746" fill="#94a3b8" font-size="11">RequestRecorder / HealthChecker / Scorer</text>
+  <text x="90" y="2766" fill="#94a3b8" font-size="11">  → MetricsCollector.inc() / observe() / set()</text>
+  <text x="90" y="2786" fill="#94a3b8" font-size="11">    → PrometheusCollector 暴露 /metrics 端点</text>
+  <text x="90" y="2806" fill="#94a3b8" font-size="11">      → Prometheus 拉取 + 存储时序数据</text>
+  <text x="90" y="2826" fill="#94a3b8" font-size="11">        → Grafana PromQL 查询 + 可视化仪表盘</text>
+  <text x="90" y="2850" fill="#64748b" font-size="10">用途: 趋势分析、容量规划、性能诊断、SLA 报表</text>
+  <text x="90" y="2868" fill="#06b6d4" font-size="10" font-weight="600">特点: 全量数据、延迟可接受 (15~30s)、可回溯历史</text>
+
+  <g filter="url(#shadow)">
+    <rect x="720" y="2695" width="620" height="190" rx="12" fill="#0d1520" stroke="#ef4444" stroke-width="1"/>
+  </g>
+  <text x="750" y="2722" fill="#fca5a5" font-size="14" font-weight="700">告警通路 (Alert Pipeline)</text>
+  <text x="750" y="2746" fill="#94a3b8" font-size="11">RequestRecorder / HealthChecker / Engine</text>
+  <text x="750" y="2766" fill="#94a3b8" font-size="11">  → AlertDispatcher.dispatch(AlertEvent)</text>
+  <text x="750" y="2786" fill="#94a3b8" font-size="11">    → AlertRules 去重静默 (同一 key 60s 内只发一次)</text>
+  <text x="750" y="2806" fill="#94a3b8" font-size="11">      → Log / 飞书 / Webhook 三通道并行推送</text>
+  <text x="750" y="2826" fill="#94a3b8" font-size="11">        → 运维人员即时感知 + 告警平台聚合</text>
+  <text x="750" y="2850" fill="#64748b" font-size="10">用途: 故障即时通知、值班响应、问题升级</text>
+  <text x="750" y="2868" fill="#ef4444" font-size="10" font-weight="600">特点: 事件驱动、秒级触达、内置去重防骚扰</text>
+
+  <!-- Legend -->
+  <rect x="60" y="2898" width="1280" height="2" rx="1" fill="#1e293b"/>
+  <circle cx="100" cy="2914" r="5" fill="#3b82f6"/><text x="112" y="2918" fill="#64748b" font-size="10">实时请求</text>
+  <circle cx="210" cy="2914" r="5" fill="#22c55e"/><text x="222" y="2918" fill="#64748b" font-size="10">后台探测</text>
+  <circle cx="320" cy="2914" r="5" fill="#06b6d4"/><text x="332" y="2918" fill="#64748b" font-size="10">指标数据流</text>
+  <circle cx="440" cy="2914" r="5" fill="#f59e0b"/><text x="452" y="2918" fill="#64748b" font-size="10">评分</text>
+  <circle cx="520" cy="2914" r="5" fill="#a855f7"/><text x="532" y="2918" fill="#64748b" font-size="10">请求执行</text>
+  <circle cx="630" cy="2914" r="5" fill="#ef4444"/><text x="642" y="2918" fill="#64748b" font-size="10">告警</text>
+  <circle cx="710" cy="2914" r="5" fill="#e65100"/><text x="722" y="2918" fill="#64748b" font-size="10">Prometheus</text>
+  <circle cx="830" cy="2914" r="5" fill="#f46800"/><text x="842" y="2918" fill="#64748b" font-size="10">Grafana</text>
+
+</svg>
+</body>
+</html>
