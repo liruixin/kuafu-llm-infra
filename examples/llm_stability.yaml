@@ -3,54 +3,68 @@
 
 llm_stability:
 
-  # === Provider credentials (pure connection info, no model info) ===
+  # === Provider credentials ===
+  # Each provider can expose multiple protocol endpoints (openai, anthropic, etc.)
   providers:
     openai-next:
-      type: openai                # "openai" | "anthropic"
       api_key: "sk-xxx"
-      base_url: "https://api.openai-next.com/v1"
+      endpoints:
+        openai:
+          base_url: "https://api.openai-next.com/v1"
+        anthropic:
+          base_url: "https://api.openai-next.com/anthropic/v1"
 
     ppio:
-      type: openai
       api_key: "sk-yyy"
-      base_url: "https://api.ppinfra.com/openai/v1"
+      endpoints:
+        openai:
+          base_url: "https://api.ppinfra.com/openai/v1"
+        anthropic:
+          base_url: "https://api.ppinfra.com/anthropic/v1"
 
     volces:
-      type: openai
       api_key: "sk-zzz"
-      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      endpoints:
+        openai:
+          base_url: "https://ark.cn-beijing.volces.com/api/v3"
 
   # === Model definitions (model is the first-class citizen) ===
   # Key = official/canonical model ID
-  # Each provider entry specifies the actual model_id at that provider.
+  # Each provider entry specifies the endpoint type and actual model_id.
   # If model_id is omitted, it defaults to the key.
   models:
     claude-opus-4-5-20251101:
       providers:
         - provider: openai-next
+          endpoint: openai
           priority: 1
           probe: true
           model_id: "claude-opus-4-5-20251101"
         - provider: ppio
-          model_id: "pa/claude-opus-4-5-20251101"
+          endpoint: anthropic
+          model_id: "claude-opus-4-5-20251101"
           priority: 2
           probe: true
 
     gpt-4.1-2025-04-14:
       providers:
         - provider: openai-next
+          endpoint: openai
           priority: 1
           probe: true
         - provider: ppio
+          endpoint: openai
           priority: 2
           probe: true
 
     deepseek-v3-2-251201:
       providers:
         - provider: volces
+          endpoint: openai
           priority: 1
           probe: true
         - provider: ppio
+          endpoint: openai
           model_id: "deepseek-chat"      # ppio uses "deepseek-chat"
           priority: 2
           probe: true

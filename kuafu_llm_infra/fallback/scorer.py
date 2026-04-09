@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from ..config.schema import ModelProviderEntry, HealthCheckConfig
+from ..config.schema import ModelProviderEntry, HealthCheckConfig, adapter_key
 from ..state.backend import StateBackend, ScoreCard
 from ..metrics.collector import MetricsCollector, NoopCollector
 from ..metrics import registry as m
@@ -76,20 +76,21 @@ class Scorer:
         results: List[ScoredProvider] = []
 
         for entry in entries:
-            card = await self._state.get_score_card(model, entry.provider)
+            key = adapter_key(entry.provider, entry.endpoint)
+            card = await self._state.get_score_card(model, key)
             score, reason = self._compute_score(entry, card)
 
             if score <= 0:
-                logger.debug(f"[scorer] {entry.provider} excluded for {model}: {reason}")
+                logger.debug(f"[scorer] {key} excluded for {model}: {reason}")
                 continue
 
             results.append(ScoredProvider(
-                provider_name=entry.provider,
+                provider_name=key,
                 entry=entry,
                 score=score,
                 reason=reason,
             ))
-            self._metrics.set(m.PROVIDER_SCORE, score, model=model, provider=entry.provider)
+            self._metrics.set(m.PROVIDER_SCORE, score, model=model, provider=key)
 
         results.sort(key=lambda x: x.score, reverse=True)
         return results

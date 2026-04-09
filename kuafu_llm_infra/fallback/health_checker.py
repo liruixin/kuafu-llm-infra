@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Dict, List, Optional
 
-from ..config.schema import LLMStabilityConfig
+from ..config.schema import LLMStabilityConfig, adapter_key
 from ..providers.base import BaseProvider
 from ..state.backend import StateBackend, ProbeResult
 from ..metrics.collector import MetricsCollector, NoopCollector
@@ -63,7 +63,7 @@ class HealthChecker:
 
     def _collect_probe_targets(self) -> List[tuple]:
         """
-        Collect all (canonical_model, provider_name, actual_model_id) tuples
+        Collect all (canonical_model, adapter_key, actual_model_id) tuples
         that need probing from the models config.
         """
         targets = []
@@ -74,10 +74,11 @@ class HealthChecker:
                 provider_cfg = self._config.providers.get(entry.provider)
                 if not provider_cfg or not provider_cfg.enabled:
                     continue
-                if entry.provider not in self._adapters:
+                key = adapter_key(entry.provider, entry.endpoint)
+                if key not in self._adapters:
                     continue
                 actual_model_id = entry.model_id or canonical_model
-                targets.append((canonical_model, entry.provider, actual_model_id))
+                targets.append((canonical_model, key, actual_model_id))
         return targets
 
     async def _probe_loop(self) -> None:

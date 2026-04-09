@@ -128,33 +128,40 @@ pip install kuafu-llm-infra[redis]        # Redis 状态后端 + 多实例同步
 
 ```yaml
 llm_stability:
-  # 提供商（纯连接凭证）
+  # 提供商（每个提供商可有多个协议端点）
   providers:
     openai-next:
-      type: openai
       api_key: "sk-xxx"
-      base_url: "https://api.openai-next.com/v1"
+      endpoints:
+        openai:
+          base_url: "https://api.openai-next.com/v1"
 
     ppio:
-      type: openai
       api_key: "sk-yyy"
-      base_url: "https://api.ppinfra.com/openai/v1"
+      endpoints:
+        openai:
+          base_url: "https://api.ppinfra.com/openai/v1"
+        anthropic:
+          base_url: "https://api.ppinfra.com/anthropic/v1"
 
   # 模型定义（模型为第一公民）
   models:
     claude-opus-4-5-20251101:
       providers:
         - provider: openai-next
+          endpoint: openai
           priority: 1
           probe: true
         - provider: ppio
-          model_id: "pa/claude-opus-4-5-20251101"   # 该提供商使用不同的模型 ID
+          endpoint: anthropic
+          model_id: "claude-opus-4-5-20251101"
           priority: 2
           probe: true
 
     gpt-4.1-2025-04-14:
       providers:
         - provider: openai-next
+          endpoint: openai
           priority: 1
           probe: true
 
@@ -331,7 +338,16 @@ def _create(api_key, base_url, extra_headers=None):
     return MyProvider(api_key=api_key, base_url=base_url)
 ```
 
-然后在配置中使用 `type: my_type` 即可。
+然后在配置中使用该端点类型即可：
+
+```yaml
+providers:
+  my-vendor:
+    api_key: "sk-xxx"
+    endpoints:
+      my_type:
+        base_url: "https://api.my-vendor.com/v1"
+```
 
 ### 新增降级策略
 
@@ -374,6 +390,30 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 ```
+
+**纯 asyncio / 脚本（信号优雅退出）**
+
+如果不使用 Web 框架，或者担心进程被强行终止（Ctrl+C / SIGTERM）时后台任务未清理，可以注册信号处理：
+
+```python
+import signal
+import asyncio
+from kuafu_llm_infra import create_client
+
+async def main():
+    client = create_client("llm_stability.yaml")
+
+    # 注册信号，确保强退时优雅关闭
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(client.shutdown()))
+
+    # ... 业务逻辑 ...
+
+asyncio.run(main())
+```
+
+> **说明**：即使不注册信号处理，进程也能正常退出（后台任务均为 asyncio Task，不会阻塞进程），但可能会在日志中看到 `Task was destroyed but it is pending` 警告。注册信号后可以消除此警告并确保资源优雅释放。
 
 **Django（ASGI）**
 
@@ -584,9 +624,10 @@ alert:
 llm_stability:
   providers:
     dev-proxy:
-      type: openai
       api_key: "sk-dev-xxx"
-      base_url: "http://localhost:8080/v1"
+      endpoints:
+        openai:
+          base_url: "http://localhost:8080/v1"
 
   metrics:
     enabled: true
@@ -606,13 +647,15 @@ llm_stability:
 llm_stability:
   providers:
     primary-vendor:
-      type: openai
-      api_key: "${LLM_PRIMARY_API_KEY}"     # 通过环境变量注入敏感信息
-      base_url: "https://api.primary.com/v1"
+      api_key: "${LLM_PRIMARY_API_KEY}"
+      endpoints:
+        openai:
+          base_url: "https://api.primary.com/v1"
     backup-vendor:
-      type: openai
       api_key: "${LLM_BACKUP_API_KEY}"
-      base_url: "https://api.backup.com/v1"
+      endpoints:
+        openai:
+          base_url: "https://api.backup.com/v1"
 
   metrics:
     enabled: true

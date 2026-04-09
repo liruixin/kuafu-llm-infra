@@ -16,18 +16,27 @@ from pydantic import BaseModel, Field
 # Provider config (pure credentials, no model info)
 # ============================================================================
 
+class EndpointConfig(BaseModel):
+    """A single protocol endpoint under a provider."""
+    base_url: str = ""
+
+
 class ProviderConfig(BaseModel):
     """
     Single LLM provider connection credentials.
 
-    Providers are pure connection endpoints — model-specific
-    configuration lives in ``ModelConfig``.
+    A provider can expose multiple protocol endpoints (openai, anthropic, etc.),
+    each with its own base_url. Model entries reference a specific endpoint.
     """
     name: str = ""
-    type: str = "openai"  # "openai" | "anthropic"
     api_key: str = ""
-    base_url: str = ""
+    endpoints: Dict[str, EndpointConfig] = Field(default_factory=dict)
     enabled: bool = True
+
+
+def adapter_key(provider: str, endpoint: str) -> str:
+    """Build the internal adapter key from provider name and endpoint type."""
+    return f"{provider}:{endpoint}"
 
 
 # ============================================================================
@@ -37,6 +46,7 @@ class ProviderConfig(BaseModel):
 class ModelProviderEntry(BaseModel):
     """One provider's entry under a model definition."""
     provider: str                            # references key in providers dict
+    endpoint: str                            # references key in provider's endpoints dict
     model_id: Optional[str] = None           # actual ID at this provider; None → same as model key
     priority: int = 99
     probe: bool = True                       # whether to health-probe this (model, provider)
@@ -175,12 +185,12 @@ class LLMStabilityConfig(BaseModel):
             if not provider.name:
                 provider.name = name
 
-    def resolve_model_id(self, canonical_model: str, provider_name: str) -> str:
-        """Resolve the actual model_id for a (model, provider) pair."""
+    def resolve_model_id(self, canonical_model: str, adapter_key_str: str) -> str:
+        """Resolve the actual model_id for a (model, adapter_key) pair."""
         model_cfg = self.models.get(canonical_model)
         if model_cfg:
             for entry in model_cfg.providers:
-                if entry.provider == provider_name:
+                if adapter_key(entry.provider, entry.endpoint) == adapter_key_str:
                     return entry.model_id or canonical_model
         return canonical_model
 
@@ -199,7 +209,7 @@ class LLMStabilityConfig(BaseModel):
         """
         errors: List[str] = []
 
-        # Each model must reference existing, enabled providers
+        # Each model must reference existing, enabled providers and valid endpoints
         for model_name, model_cfg in self.models.items():
             enabled_count = 0
             for entry in model_cfg.providers:
@@ -207,6 +217,11 @@ class LLMStabilityConfig(BaseModel):
                 if provider_cfg is None:
                     errors.append(
                         f"Model '{model_name}' references unknown provider '{entry.provider}'"
+                    )
+                elif entry.endpoint not in provider_cfg.endpoints:
+                    errors.append(
+                        f"Model '{model_name}' references unknown endpoint "
+                        f"'{entry.endpoint}' on provider '{entry.provider}'"
                     )
                 elif provider_cfg.enabled:
                     enabled_count += 1

@@ -37,7 +37,7 @@ import logging
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
-from .config.schema import LLMStabilityConfig, ProviderConfig
+from .config.schema import LLMStabilityConfig, ProviderConfig, adapter_key
 from .config.loader import load_config
 from .providers.base import BaseProvider, ChatResponse, StreamChunk, ToolCall
 from .providers.registry import create_provider
@@ -323,27 +323,43 @@ class LLMClient:
         old_config = self._config
         self._config = new_config
 
-        # Rebuild adapters for changed providers
+        # Build set of expected adapter keys from new config
+        expected_keys = set()
         for name, provider_cfg in new_config.providers.items():
-            old_provider = old_config.providers.get(name)
             if not provider_cfg.enabled:
-                self._adapters.pop(name, None)
+                # Remove all adapters for disabled providers
+                for ep_type in provider_cfg.endpoints:
+                    self._adapters.pop(adapter_key(name, ep_type), None)
                 continue
-            if (
-                old_provider is None
-                or old_provider.api_key != provider_cfg.api_key
-                or old_provider.base_url != provider_cfg.base_url
-            ):
-                adapter = self._create_adapter(provider_cfg)
-                if adapter:
-                    self._adapters[name] = adapter
-                    logger.info(f"Provider adapter rebuilt: {name}")
 
-        # Remove adapters for deleted providers
-        for name in list(self._adapters.keys()):
-            if name not in new_config.providers:
-                del self._adapters[name]
-                logger.info(f"Provider adapter removed: {name}")
+            for ep_type, ep_cfg in provider_cfg.endpoints.items():
+                key = adapter_key(name, ep_type)
+                expected_keys.add(key)
+
+                # Check if this endpoint changed
+                old_provider = old_config.providers.get(name)
+                old_ep = (
+                    old_provider.endpoints.get(ep_type) if old_provider else None
+                )
+                if (
+                    old_ep is None
+                    or old_provider.api_key != provider_cfg.api_key
+                    or old_ep.base_url != ep_cfg.base_url
+                ):
+                    adpt = self._create_adapter(
+                        provider_type=ep_type,
+                        api_key=provider_cfg.api_key,
+                        base_url=ep_cfg.base_url,
+                    )
+                    if adpt:
+                        self._adapters[key] = adpt
+                        logger.info(f"Provider adapter rebuilt: {key}")
+
+        # Remove adapters no longer in config
+        for key in list(self._adapters.keys()):
+            if key not in expected_keys:
+                del self._adapters[key]
+                logger.info(f"Provider adapter removed: {key}")
 
         # Update sub-components via public APIs (no private attribute access)
         self._engine.update_config(new_config, self._adapters)
@@ -359,24 +375,34 @@ class LLMClient:
         for name, provider_cfg in config.providers.items():
             if not provider_cfg.enabled:
                 continue
-            adapter = self._create_adapter(provider_cfg)
-            if adapter:
-                self._adapters[name] = adapter
+            for ep_type, ep_cfg in provider_cfg.endpoints.items():
+                key = adapter_key(name, ep_type)
+                adpt = self._create_adapter(
+                    provider_type=ep_type,
+                    api_key=provider_cfg.api_key,
+                    base_url=ep_cfg.base_url,
+                )
+                if adpt:
+                    self._adapters[key] = adpt
 
     @staticmethod
-    def _create_adapter(provider_cfg: ProviderConfig) -> Optional[BaseProvider]:
-        if not provider_cfg.base_url:
+    def _create_adapter(
+        provider_type: str,
+        api_key: str,
+        base_url: str,
+    ) -> Optional[BaseProvider]:
+        if not base_url:
             return None
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {provider_cfg.api_key}",
+            "Authorization": f"Bearer {api_key}",
         }
 
         return create_provider(
-            provider_cfg.type,
-            api_key=provider_cfg.api_key,
-            base_url=provider_cfg.base_url,
+            provider_type,
+            api_key=api_key,
+            base_url=base_url,
             extra_headers=headers,
         )
 
