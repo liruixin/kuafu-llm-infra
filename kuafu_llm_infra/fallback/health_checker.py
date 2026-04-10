@@ -179,7 +179,15 @@ class HealthChecker:
             self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="error")
 
             # 探测失败日志：输出异常类型 + 详情，避免某些 SDK 异常 str() 为空
-            error_detail = str(e) or repr(e)
+            error_detail = str(e) or repr(e) or "(no detail)"
+            # 附加异常属性（HTTP status_code / response body 等），帮助定位问题
+            extra_parts = []
+            for attr in ("status_code", "status", "code", "response"):
+                val = getattr(e, attr, None)
+                if val is not None:
+                    extra_parts.append(f"{attr}={val}")
+            if extra_parts:
+                error_detail = f"{error_detail} ({', '.join(extra_parts)})"
             logger.warning(
                 f"Probe ({canonical_model}, {provider_name}): "
                 f"failed - [{type(e).__name__}] {error_detail}"
