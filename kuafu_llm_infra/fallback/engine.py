@@ -15,7 +15,6 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from ..types import RequestContext, TokenUsage
 from ..config.schema import (
     StrategyConfig,
-    StrategyMode,
     LLMStabilityConfig,
 )
 from ..providers.base import BaseProvider, ChatResponse, StreamChunk
@@ -249,6 +248,7 @@ class FallbackEngine:
             tool_choice=tool_choice,
             extra_kwargs=kwargs,
         )
+        # 拿到具体要执行的策略组
         strategy_cfg = self._resolve_strategy(ctx)
         chain = self._build_model_chain(strategy_cfg)
 
@@ -323,7 +323,6 @@ class FallbackEngine:
 
         if ctx.model:
             return StrategyConfig(
-                mode=StrategyMode.BLOCK,
                 primary=ctx.model,
             )
 

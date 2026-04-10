@@ -80,7 +80,6 @@ llm_stability:
   strategies:
     # Requirement clarification — streaming, user-facing
     requirement_clarify:
-      mode: stream
       primary: claude-opus-4-5-20251101
       fallback:
         - gpt-4.1-2025-04-14
@@ -94,7 +93,6 @@ llm_stability:
 
     # Code generation — non-streaming, internal
     code_generation:
-      mode: block
       primary: deepseek-v3-2-251201
       fallback:
         - gpt-4.1-2025-04-14
@@ -103,7 +101,6 @@ llm_stability:
 
     # Chat — streaming, general purpose
     chat:
-      mode: stream
       primary: gpt-4.1-2025-04-14
       fallback:
         - deepseek-v3-2-251201

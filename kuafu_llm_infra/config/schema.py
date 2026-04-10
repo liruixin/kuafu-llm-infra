@@ -66,10 +66,6 @@ class ModelConfig(BaseModel):
 # Strategy config
 # ============================================================================
 
-class StrategyMode(str, Enum):
-    STREAM = "stream"
-    BLOCK = "block"
-
 
 class TimeoutConfig(BaseModel):
     """Timeout thresholds for a strategy."""
@@ -85,7 +81,6 @@ class StrategyConfig(BaseModel):
     ``primary`` and ``fallback`` reference canonical model IDs
     (keys in the ``models`` dict).
     """
-    mode: StrategyMode = StrategyMode.STREAM
     primary: str                              # canonical model ID
     fallback: List[str] = Field(default_factory=list)  # ordered fallback model IDs
     timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
