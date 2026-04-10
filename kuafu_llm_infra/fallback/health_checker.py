@@ -178,15 +178,18 @@ class HealthChecker:
             self._metrics.set(m.PROVIDER_HEALTH, 0.0, provider=provider_name)
             self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="error")
 
+            # 探测失败日志：输出异常类型 + 详情，避免某些 SDK 异常 str() 为空
+            error_detail = str(e) or repr(e)
             logger.warning(
-                f"Probe ({canonical_model}, {provider_name}): failed - {e}"
+                f"Probe ({canonical_model}, {provider_name}): "
+                f"failed - [{type(e).__name__}] {error_detail}"
             )
 
             if self._alert_dispatcher:
                 self._alert_dispatcher.dispatch(AlertEvent(
                     level="warning",
                     title="probe_failed",
-                    message=f"Probe failed for {canonical_model} @ {provider_name}: {e}",
+                    message=f"Probe failed for {canonical_model} @ {provider_name}: [{type(e).__name__}] {error_detail}",
                     provider=provider_name,
                     model=canonical_model,
                 ))
