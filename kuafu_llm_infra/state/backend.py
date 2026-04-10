@@ -77,7 +77,7 @@ class ScoreCard:
     window_ttl: float = 300.0  # 5 minutes
 
     def push_request(self, outcome: RequestOutcome) -> None:
-        """Record a request outcome into the sliding window."""
+        """将一次请求结果写入滑动窗口，并更新连续失败计数。"""
         entry = SlidingWindowEntry(
             success=outcome.success,
             ttft_seconds=outcome.ttft_seconds,
@@ -87,9 +87,11 @@ class ScoreCard:
             timestamp=outcome.timestamp,
         )
         self.window.append(entry)
+        # 窗口满了则丢弃最早的记录
         if len(self.window) > self.window_size:
             self.window = self.window[-self.window_size:]
 
+        # 更新连续失败计数：成功则归零，失败则累加
         if outcome.success:
             self.consecutive_failures = 0
         else:
@@ -97,11 +99,19 @@ class ScoreCard:
             self.last_failure_time = outcome.timestamp
 
     def update_probe(self, result: ProbeResult) -> None:
-        """Update probe data."""
+        """更新探测数据，同时将探测结果写入滑动窗口以影响成功率和稳定性评分。"""
         self.health = result.health
         self.probe_ttft_ms = result.ttft_ms
         self.probe_valid = result.valid_response
         self.probe_time = result.timestamp
+
+        # 探测结果也计入滑动窗口，使备用模型的成功率和稳定性有数据支撑
+        self.push_request(RequestOutcome(
+            success=result.health and result.valid_response,
+            ttft_seconds=result.ttft_ms / 1000.0 if result.ttft_ms > 0 else None,
+            failure_reason=None if result.health else "probe_failed",
+            timestamp=result.timestamp,
+        ))
 
     def recent_entries(self, within_seconds: float = 300.0) -> List[SlidingWindowEntry]:
         """Return entries within the given time window."""

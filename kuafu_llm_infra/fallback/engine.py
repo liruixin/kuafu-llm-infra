@@ -1,8 +1,7 @@
 """
-Fallback decision engine.
+降级决策引擎
 
-Pure orchestration: resolve strategy -> build model chain ->
-rank providers -> try each -> delegate to StreamMonitor / RequestRecorder.
+纯编排逻辑：解析策略 → 构建模型链 → 评分排序 → 逐个尝试 → 委托 StreamMonitor / RequestRecorder。
 """
 
 from __future__ import annotations
@@ -31,12 +30,12 @@ logger = logging.getLogger("kuafu_llm_infra.engine")
 
 
 class AllProvidersExhausted(Exception):
-    """Raised when all providers (including fallbacks) have failed."""
+    """所有提供商（含降级）均已耗尽。"""
     pass
 
 
 class FallbackEngine:
-    """Core fallback engine that orchestrates provider selection and retry."""
+    """降级引擎：负责提供商选择、重试编排和异常处理。"""
 
     def __init__(
         self,
@@ -60,12 +59,12 @@ class FallbackEngine:
         config: LLMStabilityConfig,
         adapters: Dict[str, BaseProvider],
     ) -> None:
-        """Apply new configuration (called by gateway on hot-reload)."""
+        """热更新配置（由 gateway 调用）。"""
         self._config = config
         self._adapters = adapters
 
     # ------------------------------------------------------------------
-    # Public API
+    # 非流式调用
     # ------------------------------------------------------------------
 
     async def execute_chat(
@@ -81,41 +80,9 @@ class FallbackEngine:
         labels: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        """Execute a non-streaming chat request with fallback.
+        """非流式请求，带降级重试。"""
 
-        Args:
-            business_key: Strategy key defined in config.
-            messages: Conversation messages in OpenAI format.
-            model: Override model (bypasses strategy resolution).
-            max_tokens: Maximum tokens to generate.
-            temperature: Sampling temperature.
-            tools: Tool definitions for function calling. Each item
-                follows the **OpenAI tool format**::
-
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "get_weather",
-                            "description": "Get current weather",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "city": {"type": "string"}
-                                },
-                                "required": ["city"]
-                            }
-                        }
-                    }
-
-                The library uses OpenAI format as the unified standard.
-                Provider adapters convert to their native format
-                automatically (e.g. Anthropic ``input_schema``).
-            tool_choice: Controls how the model selects tools.
-                - ``"auto"`` – model decides (default when tools present)
-                - ``"none"`` – model must not call tools
-            labels: Custom label key-value pairs for metrics.
-            **kwargs: Additional provider-specific parameters.
-        """
+        # 1. 构建请求上下文
         ctx = RequestContext(
             business_key=business_key,
             messages=messages,
@@ -127,20 +94,30 @@ class FallbackEngine:
             tool_choice=tool_choice,
             extra_kwargs=kwargs,
         )
+
+        # 2. 根据 business_key 查找策略配置
         strategy_cfg = self._resolve_strategy(ctx)
+
+        # 3. 构建模型链：[主模型, 降级模型1, 降级模型2, ...]
         chain = self._build_model_chain(strategy_cfg)
 
         last_error: Optional[Exception] = None
 
+        # 4. 按模型链顺序依次尝试
         for canonical_model in chain:
+
+            # 5. 获取该模型下配置的所有提供商
             entries = self._config.get_model_providers(canonical_model)
+            # 6. 按复合评分排序（健康×优先级×速度×成功率×稳定性），不健康的会被排除
             ranked = await self._scorer.rank_providers(canonical_model, entries)
 
+            # 7. 逐个尝试排名靠前的提供商
             for sp in ranked:
                 adapter = self._adapters.get(sp.provider_name)
                 if not adapter:
                     continue
 
+                # 填充上下文：当前使用的模型和提供商
                 ctx.canonical_model = canonical_model
                 ctx.provider_name = sp.provider_name
                 ctx.actual_model_id = self._config.resolve_model_id(
@@ -151,6 +128,7 @@ class FallbackEngine:
                 start = time.monotonic()
 
                 try:
+                    # 8. 发起请求，设置总超时
                     response = await asyncio.wait_for(
                         adapter.chat(
                             model=ctx.actual_model_id,
@@ -167,6 +145,7 @@ class FallbackEngine:
 
                     duration = time.monotonic() - start
 
+                    # 8. 空响应视为失败，触发切换
                     if not response.content.strip() and not response.tool_calls:
                         raise StrategyTriggered(StrategyEvent(
                             strategy="empty_response",
@@ -176,6 +155,7 @@ class FallbackEngine:
                             detail={"elapsed": duration},
                         ))
 
+                    # 9. 成功：记录指标，返回结果
                     await self._recorder.record_success(
                         ctx,
                         duration=duration,
@@ -184,6 +164,7 @@ class FallbackEngine:
                     return response
 
                 except asyncio.TimeoutError:
+                    # 超时：记录失败，尝试下一个提供商
                     duration = time.monotonic() - start
                     logger.warning(
                         f"[engine] {sp.provider_name} timeout after {duration:.1f}s "
@@ -195,6 +176,7 @@ class FallbackEngine:
                     last_error = TimeoutError(f"Provider {sp.provider_name} timed out")
 
                 except StrategyTriggered as e:
+                    # 策略触发（如空响应）：记录失败，尝试下一个提供商
                     logger.warning(
                         f"[engine] {sp.provider_name} strategy triggered: "
                         f"{e.event.strategy}"
@@ -205,10 +187,12 @@ class FallbackEngine:
                     last_error = e
 
                 except Exception as e:
+                    # 其他异常：记录失败，尝试下一个提供商
                     logger.error(f"[engine] {sp.provider_name} error: {e}")
                     await self._recorder.record_failure(ctx, "error", str(e))
                     last_error = e
 
+        # 10. 所有提供商耗尽，发送告警并抛异常
         self._recorder.send_alert(
             "critical", "all_providers_exhausted",
             f"All providers exhausted for business_key={ctx.business_key}",
@@ -216,6 +200,10 @@ class FallbackEngine:
         raise AllProvidersExhausted(
             f"No provider available for {ctx.business_key}. Last error: {last_error}"
         )
+
+    # ------------------------------------------------------------------
+    # 流式调用
+    # ------------------------------------------------------------------
 
     async def execute_chat_stream(
         self,
@@ -230,13 +218,9 @@ class FallbackEngine:
         labels: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Execute a streaming chat request with fallback.
+        """流式请求，带降级重试。"""
 
-        Args:
-            tools: Same format as :meth:`execute_chat`. See that method
-                for the full tool definition schema.
-            tool_choice: Same format as :meth:`execute_chat`.
-        """
+        # 1. 构建请求上下文
         ctx = RequestContext(
             business_key=business_key,
             messages=messages,
@@ -248,21 +232,30 @@ class FallbackEngine:
             tool_choice=tool_choice,
             extra_kwargs=kwargs,
         )
-        # 拿到具体要执行的策略组
+
+        # 2. 根据 business_key 查找策略配置
         strategy_cfg = self._resolve_strategy(ctx)
+
+        # 3. 构建模型链：[主模型, 降级模型1, 降级模型2, ...]
         chain = self._build_model_chain(strategy_cfg)
 
         last_error: Optional[Exception] = None
 
+        # 4. 按模型链顺序依次尝试
         for canonical_model in chain:
+
+            # 5. 获取该模型下配置的所有提供商
             entries = self._config.get_model_providers(canonical_model)
+            # 6. 按复合评分排序（健康×优先级×速度×成功率×稳定性），不健康的会被排除
             ranked = await self._scorer.rank_providers(canonical_model, entries)
 
+            # 7. 逐个尝试排名靠前的提供商
             for sp in ranked:
                 adapter = self._adapters.get(sp.provider_name)
                 if not adapter:
                     continue
 
+                # 填充上下文：当前使用的模型和提供商
                 ctx.canonical_model = canonical_model
                 ctx.provider_name = sp.provider_name
                 ctx.actual_model_id = self._config.resolve_model_id(
@@ -270,6 +263,7 @@ class FallbackEngine:
                 )
 
                 try:
+                    # 8. 通过 StreamMonitor 包装流，实时检测异常（TTFT 超时、空帧、慢速等）
                     chunk_count = 0
                     async for chunk in self._stream_monitor.monitored_stream(
                         adapter, strategy_cfg, ctx,
@@ -277,11 +271,13 @@ class FallbackEngine:
                         chunk_count += 1
                         yield chunk
 
+                    # 9. 流正常结束且有内容，直接返回
                     if chunk_count > 0:
                         return
 
                 except StrategyTriggered as e:
                     if e.event.action == StrategyAction.SWITCH:
+                        # Phase 1（首 Token 前）：还没给用户返回内容，可以切换提供商
                         logger.warning(
                             f"[engine] {sp.provider_name} stream switch: "
                             f"{e.event.strategy}"
@@ -291,6 +287,7 @@ class FallbackEngine:
                         )
                         last_error = e
                     else:
+                        # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
                         logger.warning(
                             f"[engine] {sp.provider_name} stream record: "
                             f"{e.event.strategy}"
@@ -301,10 +298,12 @@ class FallbackEngine:
                         return
 
                 except Exception as e:
+                    # 其他异常：记录失败，尝试下一个提供商
                     logger.error(f"[engine] {sp.provider_name} stream error: {e}")
                     await self._recorder.record_failure(ctx, "error", str(e))
                     last_error = e
 
+        # 10. 所有提供商耗尽，发送告警并抛异常
         self._recorder.send_alert(
             "critical", "all_providers_exhausted",
             f"All providers exhausted for business_key={ctx.business_key}",
@@ -314,10 +313,11 @@ class FallbackEngine:
         )
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # 内部方法
     # ------------------------------------------------------------------
 
     def _resolve_strategy(self, ctx: RequestContext) -> StrategyConfig:
+        """根据 business_key 查找策略配置；未命中则用 model 构建默认策略。"""
         if ctx.business_key in self._config.strategies:
             return self._config.strategies[ctx.business_key]
 
@@ -332,6 +332,7 @@ class FallbackEngine:
 
     @staticmethod
     def _build_model_chain(strategy_cfg: StrategyConfig) -> List[str]:
+        """拼接模型链：主模型在前，降级模型按顺序跟在后面。"""
         chain = [strategy_cfg.primary]
         chain.extend(strategy_cfg.fallback)
         return chain
