@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from ..types import RequestContext, TokenUsage
 from ..config.schema import (
@@ -64,6 +64,57 @@ class FallbackEngine:
         self._adapters = adapters
 
     # ------------------------------------------------------------------
+    # 候选遍历（统一管理 deadline + 模型链 + 提供商排序）
+    # ------------------------------------------------------------------
+
+    async def _iter_candidates(
+        self,
+        strategy_cfg: StrategyConfig,
+        chain: List[str],
+        ctx: RequestContext,
+    ) -> AsyncIterator[Tuple[BaseProvider, float]]:
+        """
+        遍历模型链中所有候选提供商，yield (adapter, timeout)。
+
+        - 按模型链顺序 → 每个模型的提供商按评分排序
+        - 自动管理 deadline，剩余预算不足时终止
+        - 自动填充 ctx 的 canonical_model / provider_name / actual_model_id
+        """
+        deadline = time.monotonic() + strategy_cfg.timeout.total
+        per_request = strategy_cfg.timeout.per_request
+
+        for canonical_model in chain:
+            # 检查链路剩余预算
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+
+            # 获取该模型下配置的所有提供商
+            entries = self._config.get_model_providers(canonical_model)
+            # 按复合评分排序（健康 × 优先级 × 速度 × 成功率 × 稳定性）
+            ranked = await self._scorer.rank_providers(canonical_model, entries)
+
+            for sp in ranked:
+                # 每次尝试前重新检查剩余预算
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+
+                adapter = self._adapters.get(sp.provider_name)
+                if not adapter:
+                    continue
+
+                # 填充上下文：当前使用的模型和提供商
+                ctx.canonical_model = canonical_model
+                ctx.provider_name = sp.provider_name
+                ctx.actual_model_id = self._config.resolve_model_id(
+                    canonical_model, sp.provider_name,
+                )
+
+                # 单次超时 = min(配置的单次超时, 链路剩余预算)
+                yield adapter, min(per_request, remaining)
+
+    # ------------------------------------------------------------------
     # 非流式调用
     # ------------------------------------------------------------------
 
@@ -103,96 +154,73 @@ class FallbackEngine:
 
         last_error: Optional[Exception] = None
 
-        # 4. 按模型链顺序依次尝试
-        for canonical_model in chain:
+        # 4. 按模型链顺序依次尝试，deadline 自动管理总超时
+        async for adapter, timeout in self._iter_candidates(strategy_cfg, chain, ctx):
+            start = time.monotonic()
 
-            # 5. 获取该模型下配置的所有提供商
-            entries = self._config.get_model_providers(canonical_model)
-            # 6. 按复合评分排序（健康×优先级×速度×成功率×稳定性），不健康的会被排除
-            ranked = await self._scorer.rank_providers(canonical_model, entries)
-
-            # 7. 逐个尝试排名靠前的提供商
-            for sp in ranked:
-                adapter = self._adapters.get(sp.provider_name)
-                if not adapter:
-                    continue
-
-                # 填充上下文：当前使用的模型和提供商
-                ctx.canonical_model = canonical_model
-                ctx.provider_name = sp.provider_name
-                ctx.actual_model_id = self._config.resolve_model_id(
-                    canonical_model, sp.provider_name,
+            try:
+                # 5. 发起请求，设置单次超时（受 deadline 约束）
+                response = await asyncio.wait_for(
+                    adapter.chat(
+                        model=ctx.actual_model_id,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        timeout=timeout,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        **kwargs,
+                    ),
+                    timeout=timeout,
                 )
 
-                timeout = strategy_cfg.timeout.total
-                start = time.monotonic()
+                duration = time.monotonic() - start
 
-                try:
-                    # 8. 发起请求，设置总超时
-                    response = await asyncio.wait_for(
-                        adapter.chat(
-                            model=ctx.actual_model_id,
-                            messages=messages,
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                            timeout=timeout,
-                            tools=tools,
-                            tool_choice=tool_choice,
-                            **kwargs,
-                        ),
-                        timeout=timeout,
-                    )
+                # 6. 空响应视为失败，触发切换
+                if not response.content.strip() and not response.tool_calls:
+                    raise StrategyTriggered(StrategyEvent(
+                        strategy="empty_response",
+                        action=StrategyAction.SWITCH,
+                        provider=ctx.provider_name,
+                        model=ctx.canonical_model,
+                        detail={"elapsed": duration},
+                    ))
 
-                    duration = time.monotonic() - start
+                # 7. 成功：记录指标，返回结果
+                await self._recorder.record_success(
+                    ctx,
+                    duration=duration,
+                    usage=response.usage,
+                )
+                return response
 
-                    # 8. 空响应视为失败，触发切换
-                    if not response.content.strip() and not response.tool_calls:
-                        raise StrategyTriggered(StrategyEvent(
-                            strategy="empty_response",
-                            action=StrategyAction.SWITCH,
-                            provider=sp.provider_name,
-                            model=canonical_model,
-                            detail={"elapsed": duration},
-                        ))
+            except asyncio.TimeoutError:
+                duration = time.monotonic() - start
+                logger.warning(
+                    f"[engine] {ctx.provider_name} timeout after {duration:.1f}s "
+                    f"for {ctx.canonical_model}"
+                )
+                await self._recorder.record_failure(
+                    ctx, "total_timeout", f"timeout after {duration:.1f}s",
+                )
+                last_error = TimeoutError(f"Provider {ctx.provider_name} timed out")
 
-                    # 9. 成功：记录指标，返回结果
-                    await self._recorder.record_success(
-                        ctx,
-                        duration=duration,
-                        usage=response.usage,
-                    )
-                    return response
+            except StrategyTriggered as e:
+                logger.warning(
+                    f"[engine] {ctx.provider_name} strategy triggered: "
+                    f"{e.event.strategy}"
+                )
+                await self._recorder.record_failure(
+                    ctx, e.event.strategy, str(e.event.detail),
+                )
+                last_error = e
 
-                except asyncio.TimeoutError:
-                    # 超时：记录失败，尝试下一个提供商
-                    duration = time.monotonic() - start
-                    logger.warning(
-                        f"[engine] {sp.provider_name} timeout after {duration:.1f}s "
-                        f"for {canonical_model}"
-                    )
-                    await self._recorder.record_failure(
-                        ctx, "total_timeout", f"timeout after {duration:.1f}s",
-                    )
-                    last_error = TimeoutError(f"Provider {sp.provider_name} timed out")
+            except Exception as e:
+                logger.error(f"[engine] {ctx.provider_name} error: {e}")
+                await self._recorder.record_failure(ctx, "error", str(e))
+                last_error = e
 
-                except StrategyTriggered as e:
-                    # 策略触发（如空响应）：记录失败，尝试下一个提供商
-                    logger.warning(
-                        f"[engine] {sp.provider_name} strategy triggered: "
-                        f"{e.event.strategy}"
-                    )
-                    await self._recorder.record_failure(
-                        ctx, e.event.strategy, str(e.event.detail),
-                    )
-                    last_error = e
-
-                except Exception as e:
-                    # 其他异常：记录失败，尝试下一个提供商
-                    logger.error(f"[engine] {sp.provider_name} error: {e}")
-                    await self._recorder.record_failure(ctx, "error", str(e))
-                    last_error = e
-
-        # 10. 所有提供商耗尽，发送告警并抛异常
+        # 8. 所有提供商耗尽或 deadline 到期，发送告警并抛异常
         self._recorder.send_alert(
             "critical", "all_providers_exhausted",
             f"All providers exhausted for business_key={ctx.business_key}",
@@ -236,74 +264,58 @@ class FallbackEngine:
         # 2. 根据 business_key 查找策略配置
         strategy_cfg = self._resolve_strategy(ctx)
 
-        # 3. 构建模型链：[主模型, 降级模型1, 降级模型2, ...]
+        # 3. 构建模型链
         chain = self._build_model_chain(strategy_cfg)
 
         last_error: Optional[Exception] = None
 
-        # 4. 按模型链顺序依次尝试
-        for canonical_model in chain:
+        # 4. 按模型链顺序依次尝试，deadline 自动管理总超时
+        async for adapter, timeout in self._iter_candidates(strategy_cfg, chain, ctx):
+            # 计算传给 StreamMonitor 的 SDK 超时：min(ttft + 5, 剩余预算)
+            stream_timeout = min(strategy_cfg.timeout.ttft + 5, timeout)
 
-            # 5. 获取该模型下配置的所有提供商
-            entries = self._config.get_model_providers(canonical_model)
-            # 6. 按复合评分排序（健康×优先级×速度×成功率×稳定性），不健康的会被排除
-            ranked = await self._scorer.rank_providers(canonical_model, entries)
+            try:
+                # 5. 通过 StreamMonitor 包装流，实时检测异常（TTFT 超时、空帧、慢速等）
+                chunk_count = 0
+                async for chunk in self._stream_monitor.monitored_stream(
+                    adapter, strategy_cfg, ctx,
+                    timeout=stream_timeout,
+                ):
+                    chunk_count += 1
+                    yield chunk
 
-            # 7. 逐个尝试排名靠前的提供商
-            for sp in ranked:
-                adapter = self._adapters.get(sp.provider_name)
-                if not adapter:
-                    continue
+                # 6. 流正常结束且有内容，直接返回
+                if chunk_count > 0:
+                    return
 
-                # 填充上下文：当前使用的模型和提供商
-                ctx.canonical_model = canonical_model
-                ctx.provider_name = sp.provider_name
-                ctx.actual_model_id = self._config.resolve_model_id(
-                    canonical_model, sp.provider_name,
-                )
-
-                try:
-                    # 8. 通过 StreamMonitor 包装流，实时检测异常（TTFT 超时、空帧、慢速等）
-                    chunk_count = 0
-                    async for chunk in self._stream_monitor.monitored_stream(
-                        adapter, strategy_cfg, ctx,
-                    ):
-                        chunk_count += 1
-                        yield chunk
-
-                    # 9. 流正常结束且有内容，直接返回
-                    if chunk_count > 0:
-                        return
-
-                except StrategyTriggered as e:
-                    if e.event.action == StrategyAction.SWITCH:
-                        # Phase 1（首 Token 前）：还没给用户返回内容，可以切换提供商
-                        logger.warning(
-                            f"[engine] {sp.provider_name} stream switch: "
-                            f"{e.event.strategy}"
-                        )
-                        await self._recorder.record_failure(
-                            ctx, e.event.strategy, str(e.event.detail),
-                        )
-                        last_error = e
-                    else:
-                        # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
-                        logger.warning(
-                            f"[engine] {sp.provider_name} stream record: "
-                            f"{e.event.strategy}"
-                        )
-                        await self._scorer.record_failure(
-                            canonical_model, sp.provider_name, e.event.strategy,
-                        )
-                        return
-
-                except Exception as e:
-                    # 其他异常：记录失败，尝试下一个提供商
-                    logger.error(f"[engine] {sp.provider_name} stream error: {e}")
-                    await self._recorder.record_failure(ctx, "error", str(e))
+            except StrategyTriggered as e:
+                if e.event.action == StrategyAction.SWITCH:
+                    # Phase 1（首 Token 前）：还没给用户返回内容，可以切换提供商
+                    logger.warning(
+                        f"[engine] {ctx.provider_name} stream switch: "
+                        f"{e.event.strategy}"
+                    )
+                    await self._recorder.record_failure(
+                        ctx, e.event.strategy, str(e.event.detail),
+                    )
                     last_error = e
+                else:
+                    # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
+                    logger.warning(
+                        f"[engine] {ctx.provider_name} stream record: "
+                        f"{e.event.strategy}"
+                    )
+                    await self._scorer.record_failure(
+                        ctx.canonical_model, ctx.provider_name, e.event.strategy,
+                    )
+                    return
 
-        # 10. 所有提供商耗尽，发送告警并抛异常
+            except Exception as e:
+                logger.error(f"[engine] {ctx.provider_name} stream error: {e}")
+                await self._recorder.record_failure(ctx, "error", str(e))
+                last_error = e
+
+        # 7. 所有提供商耗尽或 deadline 到期，发送告警并抛异常
         self._recorder.send_alert(
             "critical", "all_providers_exhausted",
             f"All providers exhausted for business_key={ctx.business_key}",

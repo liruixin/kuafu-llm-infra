@@ -87,7 +87,8 @@ llm_stability:
       timeout:
         ttft: 8
         chunk_gap: 15
-        total: 120
+        per_request: 120
+        total: 180
       empty_frame_threshold: 5
       slow_speed_threshold: 5.0
 
@@ -97,7 +98,8 @@ llm_stability:
       fallback:
         - gpt-4.1-2025-04-14
       timeout:
-        total: 60
+        per_request: 60
+        total: 120
 
     # Chat — streaming, general purpose
     chat:
@@ -107,6 +109,8 @@ llm_stability:
       timeout:
         ttft: 6
         chunk_gap: 10
+        per_request: 60
+        total: 90
 
   # === Health check & probing ===
   health_check:

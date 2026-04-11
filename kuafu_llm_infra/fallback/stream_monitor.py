@@ -48,16 +48,24 @@ class StreamMonitor:
         adapter: BaseProvider,
         strategy_cfg: StrategyConfig,
         ctx: RequestContext,
+        *,
+        timeout: Optional[float] = None,
     ) -> AsyncIterator[StreamChunk]:
         """
         Stream from adapter with real-time strategy monitoring.
 
         Yields StreamChunk objects. Raises StrategyTriggered on anomaly.
         On successful completion, records metrics via recorder.
+
+        Args:
+            timeout: SDK 连接超时，由 engine 根据 deadline 剩余预算传入。
+                     若为 None 则回退到 ttft + 5。
         """
         strategies = create_strategies(
             strategy_cfg, ctx.provider_name, ctx.canonical_model,
         )
+
+        sdk_timeout = timeout if timeout is not None else strategy_cfg.timeout.ttft + 5
 
         start = time.monotonic()
         token_estimate = 0
@@ -72,7 +80,7 @@ class StreamMonitor:
                 messages=ctx.messages,
                 max_tokens=ctx.max_tokens,
                 temperature=ctx.temperature,
-                timeout=strategy_cfg.timeout.ttft + 5,
+                timeout=sdk_timeout,
                 tools=ctx.tools,
                 tool_choice=ctx.tool_choice,
                 **ctx.extra_kwargs,

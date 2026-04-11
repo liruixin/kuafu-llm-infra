@@ -36,6 +36,27 @@ class AnthropicProvider(BaseProvider):
         return "anthropic"
 
     # ------------------------------------------------------------------
+    # Probe（禁用 thinking 以加速探测）
+    # ------------------------------------------------------------------
+
+    async def probe(
+        self,
+        model: str,
+        *,
+        max_tokens: int = 5,
+        timeout: float = 10.0,
+    ) -> AsyncIterator[StreamChunk]:
+        """Anthropic 探测：显式关闭 thinking 避免模型思考导致 TTFT 超时。"""
+        async for chunk in self.chat_stream(
+            model=model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=max_tokens,
+            timeout=timeout,
+            thinking={"type": "disabled"},
+        ):
+            yield chunk
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

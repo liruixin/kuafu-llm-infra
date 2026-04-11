@@ -69,9 +69,10 @@ class ModelConfig(BaseModel):
 
 class TimeoutConfig(BaseModel):
     """Timeout thresholds for a strategy."""
-    ttft: float = 8.0
-    chunk_gap: float = 15.0
-    total: float = 60.0
+    ttft: float = 8.0              # 首 token 超时
+    chunk_gap: float = 15.0        # chunk 间隔超时
+    per_request: float = 60.0      # 单次请求超时
+    total: float = 180.0           # 整条降级链路总超时
 
 
 class StrategyConfig(BaseModel):

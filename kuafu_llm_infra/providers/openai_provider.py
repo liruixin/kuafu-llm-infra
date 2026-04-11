@@ -5,6 +5,7 @@ OpenAI SDK provider adapter.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from openai import AsyncOpenAI
@@ -32,6 +33,25 @@ class OpenAIProvider(BaseProvider):
     @property
     def provider_type(self) -> str:
         return "openai"
+
+    # 匹配 <think>...</think> 标签（MiniMax、DeepSeek 等模型会在内容中输出思考过程）
+    _THINK_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.DOTALL)
+
+    async def probe(
+        self,
+        model: str,
+        *,
+        max_tokens: int = 5,
+        timeout: float = 10.0,
+    ) -> AsyncIterator[StreamChunk]:
+        """OpenAI 探测：简单流式请求，<think> 剥离由 chat_stream 统一处理。"""
+        async for chunk in self.chat_stream(
+            model=model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=max_tokens,
+            timeout=timeout,
+        ):
+            yield chunk
 
     async def chat(
         self,
@@ -87,7 +107,7 @@ class OpenAIProvider(BaseProvider):
             ]
 
         return ChatResponse(
-            content=choice.message.content or "",
+            content=self._THINK_RE.sub("", choice.message.content or ""),
             model=resp.model,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,
@@ -128,6 +148,9 @@ class OpenAIProvider(BaseProvider):
         else:
             stream = await coro
 
+        # 流式剥离 <think>...</think>：缓冲思考内容，不输出给调用方
+        in_think = False
+
         async for chunk in stream:
             usage = None
             if hasattr(chunk, "usage") and chunk.usage is not None:
@@ -143,6 +166,31 @@ class OpenAIProvider(BaseProvider):
                 continue
 
             delta = chunk.choices[0].delta
+            text = delta.content or ""
+
+            # 处理 <think> 标签：跳过思考内容
+            if text:
+                if in_think:
+                    # 正在思考块内，检查是否遇到 </think>
+                    if "</think>" in text:
+                        # 思考结束，只保留 </think> 之后的内容
+                        text = text.split("</think>", 1)[1]
+                        in_think = False
+                        if not text.strip():
+                            text = ""
+                    else:
+                        text = ""
+                elif "<think>" in text:
+                    # 进入思考块
+                    before = text.split("<think>", 1)[0]
+                    after_tag = text.split("<think>", 1)[1]
+                    if "</think>" in after_tag:
+                        # 同一 chunk 内闭合
+                        text = before + after_tag.split("</think>", 1)[1]
+                    else:
+                        text = before
+                        in_think = True
+
             delta_tool_calls = None
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 delta_tool_calls = [
@@ -154,13 +202,16 @@ class OpenAIProvider(BaseProvider):
                     )
                     for tc in delta.tool_calls
                 ]
-            yield StreamChunk(
-                content=delta.content or "",
-                finish_reason=chunk.choices[0].finish_reason,
-                usage=usage,
-                tool_calls=delta_tool_calls,
-                raw=chunk,
-            )
+
+            # 有实际内容或有 tool_calls 或有 usage 或有 finish_reason 时才 yield
+            if text or delta_tool_calls or usage or chunk.choices[0].finish_reason:
+                yield StreamChunk(
+                    content=text,
+                    finish_reason=chunk.choices[0].finish_reason,
+                    usage=usage,
+                    tool_calls=delta_tool_calls,
+                    raw=chunk,
+                )
 
 
 @register_provider("openai")

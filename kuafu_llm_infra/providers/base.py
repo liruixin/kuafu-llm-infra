@@ -151,6 +151,7 @@ class BaseProvider(ABC):
         """
         ...
 
+    @abstractmethod
     async def probe(
         self,
         model: str,
@@ -161,14 +162,7 @@ class BaseProvider(ABC):
         """
         Minimal streaming request for health/speed probing.
 
-        Default implementation delegates to ``chat_stream`` with a
-        trivial prompt. Subclasses may override for SDK-specific
-        optimisations.
+        Each provider must implement this method with SDK-specific
+        optimisations (e.g. disabling thinking for Anthropic).
         """
-        async for chunk in self.chat_stream(
-            model=model,
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=max_tokens,
-            timeout=timeout,
-        ):
-            yield chunk
+        ...
