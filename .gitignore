@@ -32,3 +32,6 @@ htmlcov/
 # Secrets - never commit
 *.env
 env.yaml
+
+# uv (not used)
+uv.lock

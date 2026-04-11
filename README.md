@@ -168,20 +168,20 @@ llm_stability:
   # 业务场景策略
   strategies:
     requirement_clarify:
-      mode: stream
       primary: claude-opus-4-5-20251101
       fallback:
         - gpt-4.1-2025-04-14
       timeout:
         ttft: 8
         chunk_gap: 15
-        total: 120
+        per_request: 120
+        total: 180
 
     code_generation:
-      mode: block
       primary: gpt-4.1-2025-04-14
       timeout:
-        total: 60
+        per_request: 60
+        total: 120
 
   # 健康探测
   health_check:
@@ -459,11 +459,11 @@ strategies:
     slow_speed_threshold: 8.0
 
   background_analysis:       # 后台批量分析，容忍高延迟
-    mode: block
     primary: deepseek-v3-2-251201
     fallback: [gpt-4.1-2025-04-14]
     timeout:
-      total: 120             # 可以等久一些
+      per_request: 120         # 单次请求可以等久一些
+      total: 240               # 整条链路总超时
 
   # ❌ 不好的设计：按接口划分
   # /api/v1/chat → chat_v1

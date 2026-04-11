@@ -123,7 +123,6 @@ class FallbackEngine:
         business_key: str,
         messages: List[Dict[str, Any]],
         *,
-        model: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -138,7 +137,6 @@ class FallbackEngine:
             business_key=business_key,
             messages=messages,
             labels=labels or {},
-            model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             tools=tools,
@@ -238,7 +236,6 @@ class FallbackEngine:
         business_key: str,
         messages: List[Dict[str, Any]],
         *,
-        model: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -253,7 +250,6 @@ class FallbackEngine:
             business_key=business_key,
             messages=messages,
             labels=labels or {},
-            model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             tools=tools,
@@ -329,17 +325,12 @@ class FallbackEngine:
     # ------------------------------------------------------------------
 
     def _resolve_strategy(self, ctx: RequestContext) -> StrategyConfig:
-        """根据 business_key 查找策略配置；未命中则用 model 构建默认策略。"""
+        """根据 business_key 查找策略配置。"""
         if ctx.business_key in self._config.strategies:
             return self._config.strategies[ctx.business_key]
 
-        if ctx.model:
-            return StrategyConfig(
-                primary=ctx.model,
-            )
-
         raise ValueError(
-            f"Unknown business_key '{ctx.business_key}' and no model specified"
+            f"Unknown business_key '{ctx.business_key}'"
         )
 
     @staticmethod

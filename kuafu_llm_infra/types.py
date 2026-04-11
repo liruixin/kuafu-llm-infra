@@ -25,12 +25,11 @@ class RequestContext:
     Request metadata flowing through the fallback engine.
 
     Created at the gateway layer and enriched by the engine
-    as it resolves strategy, model, and provider.
+    as it resolves strategy and provider.
     """
     business_key: str
     messages: List[Dict[str, Any]]
     labels: Dict[str, str] = field(default_factory=dict)
-    model: Optional[str] = None
     max_tokens: int = 4096
     temperature: Optional[float] = None
     tools: Optional[List[Dict[str, Any]]] = None

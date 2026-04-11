@@ -62,4 +62,4 @@ class TotalTimeoutStrategy(BaseStrategy):
 
 @register_strategy
 def create_total_timeout(cfg, provider: str, model: str):
-    return TotalTimeoutStrategy(cfg.timeout.total, provider, model)
+    return TotalTimeoutStrategy(cfg.timeout.per_request, provider, model)

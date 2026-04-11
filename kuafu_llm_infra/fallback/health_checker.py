@@ -126,6 +126,7 @@ class HealthChecker:
         has_content = False
 
         try:
+            logger.debug(f"Probe start: ({canonical_model}, {provider_name})")
             async for chunk in adapter.probe(
                 model=actual_model_id,
                 max_tokens=hc.probe_max_tokens,
@@ -157,7 +158,7 @@ class HealthChecker:
             self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="success")
 
             logger.debug(
-                f"Probe ({canonical_model}, {provider_name}): "
+                f"Probe done: ({canonical_model}, {provider_name}) "
                 f"healthy, ttft={ttft_ms:.0f}ms"
             )
 

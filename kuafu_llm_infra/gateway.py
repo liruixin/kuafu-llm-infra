@@ -128,7 +128,6 @@ class _Completions:
     async def create(
         self,
         *,
-        model: Optional[str] = None,
         messages: List[Dict[str, Any]],
         stream: bool = False,
         business_key: str = "default",
@@ -166,7 +165,6 @@ class _Completions:
             aiter = self._engine.execute_chat_stream(
                 business_key=business_key,
                 messages=messages,
-                model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 tools=tools,
@@ -179,7 +177,6 @@ class _Completions:
             response = await self._engine.execute_chat(
                 business_key=business_key,
                 messages=messages,
-                model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 tools=tools,
