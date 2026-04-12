@@ -52,7 +52,7 @@ class AnthropicProvider(BaseProvider):
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=max_tokens,
             timeout=timeout,
-            # thinking={"type": "disabled"},
+            thinking={"type": "disabled"},
         ):
             yield chunk
 
