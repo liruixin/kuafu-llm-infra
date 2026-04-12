@@ -241,9 +241,11 @@ class FallbackEngine:
                     ))
 
                 # 7. 成功：记录指标，返回结果
+                tps = response.usage.completion_tokens / duration if duration > 0 else 0
                 await self._recorder.record_success(
                     ctx,
                     duration=duration,
+                    tps=tps,
                     usage=response.usage,
                 )
                 total_duration = time.monotonic() - chain_start

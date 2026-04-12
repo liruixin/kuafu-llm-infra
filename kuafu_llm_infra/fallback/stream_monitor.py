@@ -73,6 +73,7 @@ class StreamMonitor:
         ttft: Optional[float] = None
         content_buffer = ""
         final_usage: Optional[TokenUsage] = None
+        model_wait_time = 0.0   # 累计等待 SDK 返回 chunk 的纯模型生成时间
 
         try:
             stream = adapter.chat_stream(
@@ -86,7 +87,11 @@ class StreamMonitor:
                 **ctx.extra_kwargs,
             )
 
+            wait_start = time.monotonic()
             async for chunk in stream:
+                # chunk 刚从 SDK 到达，累计等待时间
+                model_wait_time += time.monotonic() - wait_start
+
                 elapsed = time.monotonic() - start
                 content = chunk.content or ""
                 if content:
@@ -119,6 +124,8 @@ class StreamMonitor:
                 first_chunk = False
                 content_buffer += content
                 yield chunk
+                # yield 返回后（调用方处理完毕），开始计时等待下一个 chunk
+                wait_start = time.monotonic()
 
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - start
@@ -156,7 +163,9 @@ class StreamMonitor:
             output_tokens = token_estimate
             input_tokens = 0
 
-        tps = output_tokens / elapsed if elapsed > 0 else 0
+        # tps: 纯模型生成速度 = output_tokens / 等待SDK的总时间（排除 TTFT + 程序处理时间）
+        generation_time = (model_wait_time - ttft) if ttft is not None else model_wait_time
+        tps = output_tokens / generation_time if generation_time > 0 else 0
 
         await self._recorder.record_success(
             ctx,
