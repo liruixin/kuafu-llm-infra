@@ -199,8 +199,8 @@ class LLMClient:
         self._config_loaded = config_loaded
         self._last_config_raw: Optional[str] = None
 
-        # State backend（Redis 模式下由外部传入）
-        self._state = state or self._create_state_backend(config)
+        # State backend（Redis 模式下由外部传入，本地模式使用内存）
+        self._state = state or MemoryBackend()
 
         # Metrics
         self._metrics = self._create_metrics(config)
@@ -399,21 +399,6 @@ class LLMClient:
             base_url=base_url,
             extra_headers=headers,
         )
-
-    @staticmethod
-    def _create_state_backend(config: LLMStabilityConfig) -> StateBackend:
-        backend_type = config.state_backend.type
-        if backend_type == "redis":
-            try:
-                from .state.redis import RedisBackend
-                redis_cfg = config.state_backend.redis
-                return RedisBackend(
-                    url=redis_cfg.url if redis_cfg else "redis://localhost:6379/0",
-                    key_prefix=redis_cfg.key_prefix if redis_cfg else "llm_infra:",
-                )
-            except ImportError:
-                logger.warning("redis package not installed, falling back to memory backend")
-        return MemoryBackend()
 
     @staticmethod
     def _create_metrics(config: LLMStabilityConfig) -> MetricsCollector:

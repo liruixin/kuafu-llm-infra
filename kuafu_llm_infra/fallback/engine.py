@@ -45,6 +45,9 @@ def _label_tag(labels: Dict[str, str]) -> str:
 class FallbackEngine:
     """降级引擎：负责提供商选择、重试编排和异常处理。"""
 
+    # 可重试的 HTTP 状态码：限流、网关错误等瞬时异常
+    _RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
+
     def __init__(
         self,
         config: LLMStabilityConfig,
@@ -160,6 +163,40 @@ class FallbackEngine:
                 yield adapter, timeout
 
     # ------------------------------------------------------------------
+    # 重试判断
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _should_retry(cls, error: Exception) -> bool:
+        """判断是否应该重试当前提供商。
+
+        只有瞬时可恢复的错误才重试：
+        - HTTP 429（限流）、500/502/503（网关 / 服务端瞬时错误）
+        - 网络连接错误（ConnectionError 等）
+
+        不重试的情况：
+        - 超时（提供商当前就是慢，重试大概率还是超时）
+        - 策略触发（TTFT 超时、空响应、慢速等，属于引擎决策）
+        - 认证失败（401/403，配置问题）
+        - 内容过滤（确定性结果）
+        """
+        # 检查 HTTP 状态码（适用于 OpenAI/Anthropic/Google SDK 的异常）
+        status_code = getattr(error, "status_code", None)
+        if status_code is not None and status_code in cls._RETRYABLE_STATUS_CODES:
+            return True
+
+        # 网络连接类错误
+        if isinstance(error, (ConnectionError, OSError)):
+            return True
+
+        return False
+
+    @staticmethod
+    def _is_rate_limit(error: Exception) -> bool:
+        """判断是否为限流错误（429），限流需要短暂等待后再重试。"""
+        return getattr(error, "status_code", None) == 429
+
+    # ------------------------------------------------------------------
     # 非流式调用
     # ------------------------------------------------------------------
 
@@ -210,86 +247,128 @@ class FallbackEngine:
 
         # 4. 按模型链顺序依次尝试，deadline 自动管理总超时
         async for adapter, timeout in self._iter_candidates(strategy_cfg, chain, ctx, attempt):
-            start = time.monotonic()
+            provider_retries = 0  # 当前提供商已重试次数
 
-            try:
-                # 5. 发起请求，设置单次超时（受 deadline 约束）
-                response = await asyncio.wait_for(
-                    adapter.chat(
-                        model=ctx.actual_model_id,
-                        messages=messages,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
+            while True:  # 重试循环：对同一个提供商进行重试
+                start = time.monotonic()
+
+                try:
+                    # 5. 发起请求，设置单次超时（受 deadline 约束）
+                    response = await asyncio.wait_for(
+                        adapter.chat(
+                            model=ctx.actual_model_id,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            timeout=timeout,
+                            tools=tools,
+                            tool_choice=tool_choice,
+                            **kwargs,
+                        ),
                         timeout=timeout,
-                        tools=tools,
-                        tool_choice=tool_choice,
-                        **kwargs,
-                    ),
-                    timeout=timeout,
-                )
+                    )
 
-                duration = time.monotonic() - start
+                    duration = time.monotonic() - start
 
-                # 6. 空响应视为失败，触发切换
-                if not response.content.strip() and not response.tool_calls:
-                    raise StrategyTriggered(StrategyEvent(
-                        strategy="empty_response",
-                        action=StrategyAction.SWITCH,
-                        provider=ctx.provider_name,
-                        model=ctx.canonical_model,
-                        detail={"elapsed": duration},
-                    ))
+                    # 6. 空响应视为失败，触发切换（不重试）
+                    if not response.content.strip() and not response.tool_calls:
+                        raise StrategyTriggered(StrategyEvent(
+                            strategy="empty_response",
+                            action=StrategyAction.SWITCH,
+                            provider=ctx.provider_name,
+                            model=ctx.canonical_model,
+                            detail={"elapsed": duration},
+                        ))
 
-                # 7. 成功：记录指标，返回结果
-                tps = response.usage.completion_tokens / duration if duration > 0 else 0
-                logger.info(f"总token: {response.usage.completion_tokens}, 总耗时: {duration:.2f}s, tps: {tps}")
-                await self._recorder.record_success(
-                    ctx,
-                    duration=duration,
-                    tps=tps,
-                    usage=response.usage,
-                )
-                total_duration = time.monotonic() - chain_start
-                logger.info(
-                    f"[{business_key}]{tag} "
-                    f"#{attempt[0]} {ctx.provider_name} → 成功 | "
-                    f"{duration:.2f}s, {response.usage.total_tokens}tokens"
-                    + (f", 总耗时={total_duration:.2f}s" if attempt[0] > 1 else "")
-                )
-                return response
+                    # 7. 成功：记录指标，返回结果
+                    tps = response.usage.completion_tokens / duration if duration > 0 else 0
+                    logger.info(f"总token: {response.usage.completion_tokens}, 总耗时: {duration:.2f}s, tps: {tps}")
+                    await self._recorder.record_success(
+                        ctx,
+                        duration=duration,
+                        tps=tps,
+                        usage=response.usage,
+                    )
+                    total_duration = time.monotonic() - chain_start
+                    logger.info(
+                        f"[{business_key}]{tag} "
+                        f"#{attempt[0]} {ctx.provider_name} → 成功 | "
+                        f"{duration:.2f}s, {response.usage.total_tokens}tokens"
+                        + (f", 总耗时={total_duration:.2f}s" if attempt[0] > 1 else "")
+                    )
+                    return response
 
-            except asyncio.TimeoutError:
-                duration = time.monotonic() - start
-                logger.warning(
-                    f"[{business_key}]{tag} "
-                    f"#{attempt[0]} {ctx.provider_name} → 超时 ({duration:.1f}s)"
-                )
-                await self._recorder.record_failure(
-                    ctx, "total_timeout", f"timeout after {duration:.1f}s",
-                )
-                last_error = TimeoutError(f"Provider {ctx.provider_name} timed out")
+                except asyncio.TimeoutError:
+                    # 超时：不重试，直接切换下一个提供商
+                    duration = time.monotonic() - start
+                    logger.warning(
+                        f"[{business_key}]{tag} "
+                        f"#{attempt[0]} {ctx.provider_name} → 超时 ({duration:.1f}s)"
+                    )
+                    await self._recorder.record_failure(
+                        ctx, "total_timeout", f"timeout after {duration:.1f}s",
+                    )
+                    last_error = TimeoutError(f"Provider {ctx.provider_name} timed out")
+                    break  # 跳出重试循环，切换提供商
 
-            except StrategyTriggered as e:
-                duration = time.monotonic() - start
-                logger.warning(
-                    f"[{business_key}]{tag} "
-                    f"#{attempt[0]} {ctx.provider_name} → "
-                    f"{e.event.strategy} ({duration:.2f}s)"
-                )
-                await self._recorder.record_failure(
-                    ctx, e.event.strategy, str(e.event.detail),
-                )
-                last_error = e
+                except StrategyTriggered as e:
+                    # 策略触发（空响应、TTFT 超时等）：不重试，直接切换
+                    duration = time.monotonic() - start
+                    logger.warning(
+                        f"[{business_key}]{tag} "
+                        f"#{attempt[0]} {ctx.provider_name} → "
+                        f"{e.event.strategy} ({duration:.2f}s)"
+                    )
+                    await self._recorder.record_failure(
+                        ctx, e.event.strategy, str(e.event.detail),
+                    )
+                    last_error = e
+                    break  # 跳出重试循环，切换提供商
 
-            except Exception as e:
-                duration = time.monotonic() - start
-                logger.warning(
-                    f"[{business_key}]{tag} "
-                    f"#{attempt[0]} {ctx.provider_name} → "
-                    f"[{type(e).__name__}] {e} ({duration:.2f}s)"
-                )
-                await self._recorder.record_failure(ctx, "error", str(e))
-                last_error = e
+                except Exception as e:
+                    duration = time.monotonic() - start
+
+                    # 判断是否可以重试当前提供商
+                    if (self._should_retry(e)
+                            and provider_retries < strategy_cfg.max_retries):
+                        provider_retries += 1
+
+                        # 重新计算剩余预算，超时则放弃重试
+                        remaining = strategy_cfg.timeout.total - (time.monotonic() - chain_start)
+                        if remaining <= 0:
+                            last_error = e
+                            break
+
+                        timeout = min(strategy_cfg.timeout.per_request, remaining)
+
+                        # 限流（429）短暂等待后重试，其他错误立即重试
+                        if self._is_rate_limit(e):
+                            logger.info(
+                                f"[{business_key}]{tag} "
+                                f"#{attempt[0]} {ctx.provider_name} → "
+                                f"限流, 等待1s后重试 "
+                                f"({provider_retries}/{strategy_cfg.max_retries})"
+                            )
+                            await asyncio.sleep(1.0)
+                        else:
+                            logger.info(
+                                f"[{business_key}]{tag} "
+                                f"#{attempt[0]} {ctx.provider_name} → "
+                                f"[{type(e).__name__}] {e}, 重试 "
+                                f"({provider_retries}/{strategy_cfg.max_retries})"
+                            )
+
+                        continue  # 重试当前提供商
+
+                    # 不可重试或重试次数已耗尽，切换下一个提供商
+                    logger.warning(
+                        f"[{business_key}]{tag} "
+                        f"#{attempt[0]} {ctx.provider_name} → "
+                        f"[{type(e).__name__}] {e} ({duration:.2f}s)"
+                    )
+                    await self._recorder.record_failure(ctx, "error", str(e))
+                    last_error = e
+                    break  # 跳出重试循环，切换提供商
 
         # 8. 所有提供商耗尽或 deadline 到期，发送告警并抛异常
         total_duration = time.monotonic() - chain_start
@@ -359,66 +438,122 @@ class FallbackEngine:
 
         # 4. 按模型链顺序依次尝试，deadline 自动管理总超时
         async for adapter, timeout in self._iter_candidates(strategy_cfg, chain, ctx, attempt):
-            start = time.monotonic()
-            # 计算传给 StreamMonitor 的 SDK 超时：min(ttft + 5, 剩余预算)
-            stream_timeout = min(strategy_cfg.timeout.ttft + 5, timeout)
+            provider_retries = 0  # 当前提供商已重试次数
 
-            try:
-                # 5. 通过 StreamMonitor 包装流，实时检测异常（TTFT 超时、空帧、慢速等）
-                chunk_count = 0
-                async for chunk in self._stream_monitor.monitored_stream(
-                    adapter, strategy_cfg, ctx,
-                    timeout=stream_timeout,
-                ):
-                    chunk_count += 1
-                    yield chunk
+            while True:  # 重试循环：对同一个提供商进行重试
+                start = time.monotonic()
+                # 计算传给 StreamMonitor 的 SDK 超时：min(ttft + 5, 剩余预算)
+                stream_timeout = min(strategy_cfg.timeout.ttft + 5, timeout)
 
-                # 6. 流正常结束且有内容，直接返回
-                if chunk_count > 0:
+                try:
+                    # 5. 通过 StreamMonitor 包装流，实时检测异常（TTFT 超时、空帧、慢速等）
+                    chunk_count = 0
+                    async for chunk in self._stream_monitor.monitored_stream(
+                        adapter, strategy_cfg, ctx,
+                        timeout=stream_timeout,
+                    ):
+                        chunk_count += 1
+                        yield chunk
+
+                    # 6. 流正常结束且有内容，直接返回
+                    if chunk_count > 0:
+                        duration = time.monotonic() - start
+                        total_duration = time.monotonic() - chain_start
+                        logger.info(
+                            f"[{business_key}]{tag} "
+                            f"#{attempt[0]} {ctx.provider_name} → 成功 | "
+                            f"{duration:.2f}s, {chunk_count}chunks"
+                            + (f", 总耗时={total_duration:.2f}s" if attempt[0] > 1 else "")
+                        )
+                        return
+
+                    # 流结束但没有任何内容（空响应），不重试，直接切换
+                    break
+
+                except StrategyTriggered as e:
+                    # 策略触发（TTFT 超时、空帧、慢速等）：不重试，根据阶段决定行为
                     duration = time.monotonic() - start
-                    total_duration = time.monotonic() - chain_start
-                    logger.info(
-                        f"[{business_key}]{tag} "
-                        f"#{attempt[0]} {ctx.provider_name} → 成功 | "
-                        f"{duration:.2f}s, {chunk_count}chunks"
-                        + (f", 总耗时={total_duration:.2f}s" if attempt[0] > 1 else "")
-                    )
-                    return
+                    if e.event.action == StrategyAction.SWITCH:
+                        # Phase 1（首 Token 前）：还没给用户返回内容，可以切换提供商
+                        logger.warning(
+                            f"[{business_key}]{tag} "
+                            f"#{attempt[0]} {ctx.provider_name} → "
+                            f"{e.event.strategy} ({duration:.2f}s)"
+                        )
+                        await self._recorder.record_failure(
+                            ctx, e.event.strategy, str(e.event.detail),
+                        )
+                        last_error = e
+                    else:
+                        # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
+                        logger.warning(
+                            f"[{business_key}]{tag} "
+                            f"#{attempt[0]} {ctx.provider_name} → "
+                            f"流中异常({e.event.strategy}, 不切换) ({duration:.2f}s)"
+                        )
+                        await self._scorer.record_failure(
+                            ctx.canonical_model, ctx.provider_name, e.event.strategy,
+                        )
+                        return
+                    break  # 跳出重试循环，切换提供商
 
-            except StrategyTriggered as e:
-                duration = time.monotonic() - start
-                if e.event.action == StrategyAction.SWITCH:
-                    # Phase 1（首 Token 前）：还没给用户返回内容，可以切换提供商
+                except Exception as e:
+                    duration = time.monotonic() - start
+
+                    # 流式重试前提：还没有向用户返回任何内容（chunk_count == 0）
+                    # 一旦已经 yield 了内容，就不能重试，否则用户会收到重复数据
+                    if (chunk_count == 0
+                            and self._should_retry(e)
+                            and provider_retries < strategy_cfg.max_retries):
+                        provider_retries += 1
+
+                        # 重新计算剩余预算，超时则放弃重试
+                        remaining = strategy_cfg.timeout.total - (time.monotonic() - chain_start)
+                        if remaining <= 0:
+                            last_error = e
+                            break
+
+                        timeout = min(strategy_cfg.timeout.per_request, remaining)
+
+                        # 限流（429）短暂等待后重试，其他错误立即重试
+                        if self._is_rate_limit(e):
+                            logger.info(
+                                f"[{business_key}]{tag} "
+                                f"#{attempt[0]} {ctx.provider_name} → "
+                                f"限流, 等待1s后重试 "
+                                f"({provider_retries}/{strategy_cfg.max_retries})"
+                            )
+                            await asyncio.sleep(1.0)
+                        else:
+                            logger.info(
+                                f"[{business_key}]{tag} "
+                                f"#{attempt[0]} {ctx.provider_name} → "
+                                f"[{type(e).__name__}] {e}, 重试 "
+                                f"({provider_retries}/{strategy_cfg.max_retries})"
+                            )
+
+                        continue  # 重试当前提供商
+
+                    # 不可重试 / 重试次数已耗尽 / 已有内容返回（chunk_count > 0）
+                    if chunk_count > 0:
+                        # 已有内容返回给用户，无法切换，仅记录异常
+                        logger.warning(
+                            f"[{business_key}]{tag} "
+                            f"#{attempt[0]} {ctx.provider_name} → "
+                            f"流中异常([{type(e).__name__}] {e}, 不切换) "
+                            f"({duration:.2f}s)"
+                        )
+                        await self._recorder.record_failure(ctx, "error", str(e))
+                        return
+
                     logger.warning(
                         f"[{business_key}]{tag} "
                         f"#{attempt[0]} {ctx.provider_name} → "
-                        f"{e.event.strategy} ({duration:.2f}s)"
+                        f"[{type(e).__name__}] {e} ({duration:.2f}s)"
                     )
-                    await self._recorder.record_failure(
-                        ctx, e.event.strategy, str(e.event.detail),
-                    )
+                    await self._recorder.record_failure(ctx, "error", str(e))
                     last_error = e
-                else:
-                    # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
-                    logger.warning(
-                        f"[{business_key}]{tag} "
-                        f"#{attempt[0]} {ctx.provider_name} → "
-                        f"流中异常({e.event.strategy}, 不切换) ({duration:.2f}s)"
-                    )
-                    await self._scorer.record_failure(
-                        ctx.canonical_model, ctx.provider_name, e.event.strategy,
-                    )
-                    return
-
-            except Exception as e:
-                duration = time.monotonic() - start
-                logger.warning(
-                    f"[{business_key}]{tag} "
-                    f"#{attempt[0]} {ctx.provider_name} → "
-                    f"[{type(e).__name__}] {e} ({duration:.2f}s)"
-                )
-                await self._recorder.record_failure(ctx, "error", str(e))
-                last_error = e
+                    break  # 跳出重试循环，切换提供商
 
         # 7. 所有提供商耗尽或 deadline 到期，发送告警并抛异常
         total_duration = time.monotonic() - chain_start

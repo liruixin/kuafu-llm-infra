@@ -15,8 +15,6 @@ from .schema import (
     AlertConfig,
     AlertChannelConfig,
     AlertRulesConfig,
-    StateBackendConfig,
-    RedisConfig,
     adapter_key,
 )
 from .loader import load_config
@@ -34,8 +32,6 @@ __all__ = [
     "AlertConfig",
     "AlertChannelConfig",
     "AlertRulesConfig",
-    "StateBackendConfig",
-    "RedisConfig",
     "adapter_key",
     "load_config",
 ]

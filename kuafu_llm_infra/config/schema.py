@@ -85,6 +85,7 @@ class StrategyConfig(BaseModel):
     primary: str                              # canonical model ID
     fallback: List[str] = Field(default_factory=list)  # ordered fallback model IDs
     timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
+    max_retries: int = 1                      # 同一提供商最大重试次数（仅对瞬时网络错误和限流生效）
     empty_frame_threshold: int = 5
     slow_speed_threshold: float = 5.0  # tokens/sec
 
@@ -141,22 +142,6 @@ class AlertConfig(BaseModel):
 
 
 # ============================================================================
-# State backend config
-# ============================================================================
-
-class RedisConfig(BaseModel):
-    """Redis connection configuration."""
-    url: str = "redis://localhost:6379/0"
-    key_prefix: str = "kuafu_llm_infra:"
-
-
-class StateBackendConfig(BaseModel):
-    """State backend configuration."""
-    type: str = "memory"  # "memory" | "redis"
-    redis: Optional[RedisConfig] = None
-
-
-# ============================================================================
 # Top-level config
 # ============================================================================
 
@@ -173,7 +158,6 @@ class LLMStabilityConfig(BaseModel):
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)
-    state_backend: StateBackendConfig = Field(default_factory=StateBackendConfig)
 
     def model_post_init(self, __context: Any) -> None:
         # Inject provider name into each ProviderConfig
