@@ -86,7 +86,9 @@ class Scorer:
         for entry in entries:
             key = adapter_key(entry.provider, entry.endpoint)
             card = await self._state.get_score_card(model, key)
-            score, reason = self._compute_score(entry, card)
+            score, reason = self._compute_score(
+                entry, card, model=model, provider_name=key,
+            )
 
             sp = ScoredProvider(
                 provider_name=key,
@@ -142,6 +144,9 @@ class Scorer:
         self,
         entry: ModelProviderEntry,
         card: ScoreCard,
+        *,
+        model: str = "",
+        provider_name: str = "",
     ) -> Tuple[float, str]:
         if not card.health:
             return 0.0, "unhealthy"
@@ -164,6 +169,19 @@ class Scorer:
             + W_SUCCESS * success_rate
             + W_STABILITY * stability_score
         )
+
+        # 打出各子分值
+        if model and provider_name:
+            for comp, val in (
+                ("priority", priority_score),
+                ("speed", speed_score),
+                ("success", success_rate),
+                ("stability", stability_score),
+            ):
+                self._metrics.set(
+                    m.SCORE_COMPONENT, val,
+                    model=model, provider=provider_name, component=comp,
+                )
 
         return round(composite, 4), "ok"
 

@@ -122,8 +122,9 @@ class _StreamWrapper:
 class _Completions:
     """Mimics ``client.chat.completions`` namespace."""
 
-    def __init__(self, engine: FallbackEngine) -> None:
+    def __init__(self, engine: FallbackEngine, client: LLMClient) -> None:
         self._engine = engine
+        self._client = client
 
     async def create(
         self,
@@ -138,29 +139,9 @@ class _Completions:
         tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> Union[_CompletionResponse, _StreamWrapper]:
-        """Create a chat completion.
-
-        Args:
-            tools: Tool definitions for function calling. Each item
-                follows the **OpenAI tool format**::
-
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "get_weather",
-                            "description": "Get current weather",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "city": {"type": "string"}
-                                },
-                                "required": ["city"]
-                            }
-                        }
-                    }
-
-            tool_choice: Controls how the model selects tools.
-                ``"auto"`` | ``"none"``.        """
+        """Create a chat completion."""
+        if not self._client._config_loaded:
+            raise RuntimeError("Config not loaded from Redis yet")
         if stream:
             aiter = self._engine.execute_chat_stream(
                 business_key=business_key,
@@ -190,8 +171,8 @@ class _Completions:
 class _Chat:
     """Mimics ``client.chat`` namespace."""
 
-    def __init__(self, engine: FallbackEngine) -> None:
-        self.completions = _Completions(engine)
+    def __init__(self, engine: FallbackEngine, client: LLMClient) -> None:
+        self.completions = _Completions(engine, client)
 
 
 # ============================================================================
@@ -203,16 +184,23 @@ class LLMClient:
     OpenAI-compatible LLM client with built-in fallback,
     monitoring, and alerting.
 
-    Hot-reload: call ``update_config()`` to apply new config.
-    In multi-instance mode (Redis backend), the update is
-    automatically broadcast to all instances via pub/sub.
+    Hot-reload: call ``push_config()`` to write new config to Redis,
+    all instances will pick it up on the next pull cycle.
     """
 
-    def __init__(self, config: LLMStabilityConfig) -> None:
+    def __init__(
+        self,
+        config: LLMStabilityConfig,
+        *,
+        state: Optional[StateBackend] = None,
+        config_loaded: bool = True,
+    ) -> None:
         self._config = config
+        self._config_loaded = config_loaded
+        self._last_config_raw: Optional[str] = None
 
-        # State backend
-        self._state = self._create_state_backend(config)
+        # State backend（Redis 模式下由外部传入）
+        self._state = state or self._create_state_backend(config)
 
         # Metrics
         self._metrics = self._create_metrics(config)
@@ -247,69 +235,78 @@ class LLMClient:
         )
 
         # OpenAI-compatible interface
-        self.chat = _Chat(self._engine)
+        self.chat = _Chat(self._engine, self)
 
         self._started = False
+        self._pull_task: Optional[asyncio.Task] = None
 
     def start(self) -> None:
-        """Start background tasks (health checker, config subscriber, alert dispatcher)."""
+        """Start background tasks (health checker, config pull, alert dispatcher)."""
         if self._started:
             return
         self._health_checker.start()
         if self._alert_dispatcher:
             self._alert_dispatcher.start()
-        asyncio.create_task(self._start_config_subscriber())
+        self._pull_task = asyncio.create_task(self._config_pull_loop())
         self._started = True
         logger.info("LLMClient started")
 
     async def shutdown(self) -> None:
         """Gracefully stop all background tasks."""
         self._health_checker.stop()
-        await self._state.unsubscribe_config()
+        if self._pull_task and not self._pull_task.done():
+            self._pull_task.cancel()
         if self._alert_dispatcher:
             await self._alert_dispatcher.stop()
         self._started = False
         logger.info("LLMClient shutdown")
 
-    async def update_config(
+    async def push_config(
         self,
         new_config: Union[Dict[str, Any], LLMStabilityConfig],
-        *,
-        broadcast: bool = True,
     ) -> None:
         """
-        Apply new configuration (hot-reload).
+        写入新配置到 Redis 并立即在本实例生效。
 
-        Args:
-            new_config: New config as dict or LLMStabilityConfig.
-            broadcast: If True and Redis backend is active,
-                       publish to other instances via pub/sub.
+        其他实例会在下一次 pull 周期自动拿到新配置。
         """
         if isinstance(new_config, dict):
             new_config = LLMStabilityConfig(**new_config)
 
+        new_config.validate_references()
+
+        config_json = new_config.model_dump_json()
+        await self._state.save_config(config_json)
+        self._last_config_raw = config_json
         self._apply_config(new_config)
-
-        if broadcast:
-            config_json = new_config.model_dump_json()
-            await self._state.publish_config(config_json)
+        logger.info("Config pushed and applied")
 
     # ------------------------------------------------------------------
-    # Internal: config subscriber
+    # Internal: config pull loop
     # ------------------------------------------------------------------
 
-    async def _start_config_subscriber(self) -> None:
-        """Subscribe to config updates from other instances."""
-        def _on_remote_config(config_json: str):
+    async def _config_pull_loop(self, interval: float = 10.0) -> None:
+        """Periodically pull config from Redis and apply if changed."""
+        while True:
             try:
-                data = json.loads(config_json)
-                new_config = LLMStabilityConfig(**data)
-                self._apply_config(new_config)
-                logger.info("Remote config update applied")
+                raw = await self._state.load_config()
+                if raw is not None and raw != self._last_config_raw:
+                    data = json.loads(raw)
+                    new_config = LLMStabilityConfig(**data)
+                    new_config.validate_references()
+                    self._apply_config(new_config)
+                    self._last_config_raw = raw
+                    if not self._config_loaded:
+                        self._config_loaded = True
+                        logger.info("Config loaded from Redis (first load)")
+                    else:
+                        logger.info("Config updated from Redis")
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                logger.error(f"Failed to apply remote config: {e}", exc_info=True)
+                logger.warning(f"Config pull failed: {e}")
 
-        await self._state.subscribe_config(_on_remote_config)
+            await asyncio.sleep(interval)
 
     # ------------------------------------------------------------------
     # Internal: apply config changes
@@ -457,17 +454,35 @@ class LLMClient:
 
 def create_client(
     source: Union[str, Path, Dict[str, Any], None] = None,
+    *,
+    redis_url: Optional[str] = None,
+    redis_ssl: bool = False,
+    key_prefix: str = "kuafu_llm_infra:",
 ) -> LLMClient:
     """
-    Create an LLMClient from a config source.
+    Create an LLMClient.
 
-    Args:
-        source: YAML file path, Python dict, or None (env var).
+    两种模式：
 
-    Returns:
-        Configured LLMClient with background tasks started.
+    1. 本地配置文件::
+
+        client = create_client("llm_stability.yaml")
+
+    2. 从 Redis 拉取配置（非阻塞，后台加载）::
+
+        client = create_client(redis_url="redis://localhost:6379/0", redis_ssl=True)
+
+    Redis 模式下 create_client 立即返回，配置在后台 pull loop 中加载。
+    配置加载完成前发起请求会抛出 RuntimeError。
     """
-    config = load_config(source)
-    client = LLMClient(config=config)
+    if redis_url:
+        from .state.redis import RedisBackend
+        state = RedisBackend(url=redis_url, key_prefix=key_prefix, ssl=redis_ssl)
+        config = LLMStabilityConfig()
+        client = LLMClient(config=config, state=state, config_loaded=False)
+    else:
+        config = load_config(source)
+        client = LLMClient(config=config)
+
     client.start()
     return client

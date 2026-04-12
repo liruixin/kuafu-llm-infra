@@ -117,6 +117,14 @@ PROVIDER_SCORE = MetricDef(
     extra_labels=("model", "provider"),
 )
 
+SCORE_COMPONENT = MetricDef(
+    "llm_score_component",
+    MetricKind.GAUGE,
+    "Provider score breakdown by component",
+    scope=LabelScope.SYSTEM,
+    extra_labels=("model", "provider", "component"),
+)
+
 PROBE_TTFT = MetricDef(
     "llm_probe_ttft_seconds",
     MetricKind.HISTOGRAM,
@@ -148,6 +156,7 @@ ALL_METRICS: tuple[MetricDef, ...] = (
     STRATEGY_TRIGGERED,
     PROVIDER_HEALTH,
     PROVIDER_SCORE,
+    SCORE_COMPONENT,
     PROBE_TTFT,
     PROBE_TOTAL,
 )

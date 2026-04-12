@@ -2,7 +2,7 @@
 Redis state backend for multi-instance deployments.
 
 Provides shared score cards, probe coordination (distributed locks),
-aggregated request metrics, and config broadcast (pub/sub) across
+aggregated request metrics, and centralised config storage across
 multiple service instances.
 
 Requires: ``pip install redis``
@@ -10,12 +10,11 @@ Requires: ``pip install redis``
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import uuid
 import logging
-from typing import Callable, Optional
+from typing import Optional
 
 from .backend import (
     StateBackend,
@@ -28,8 +27,6 @@ from .backend import (
 
 logger = logging.getLogger("kuafu_llm_infra.state.redis")
 
-_CONFIG_CHANNEL = "config_update"
-
 
 class RedisBackend(StateBackend):
     """Redis-backed state storage for multi-instance coordination."""
@@ -37,7 +34,8 @@ class RedisBackend(StateBackend):
     def __init__(
         self,
         url: str = "redis://localhost:6379/0",
-        key_prefix: str = "llm_infra:",
+        key_prefix: str = "kuafu_llm_infra:",
+        ssl: bool = False,
     ) -> None:
         try:
             import redis.asyncio as aioredis
@@ -47,11 +45,12 @@ class RedisBackend(StateBackend):
                 "Install with: pip install redis"
             )
 
-        self._redis = aioredis.from_url(url, decode_responses=True)
+        kwargs = {"decode_responses": True}
+        if ssl:
+            kwargs["ssl"] = True
+        self._redis = aioredis.from_url(url, **kwargs)
         self._prefix = key_prefix
         self._instance_id = str(uuid.uuid4())[:8]
-        self._pubsub = None
-        self._sub_task: Optional[asyncio.Task] = None
 
     def _key(self, *parts: str) -> str:
         return self._prefix + ":".join(parts)
@@ -126,60 +125,16 @@ class RedisBackend(StateBackend):
             failure=int(data.get("failure", 0)),
         )
 
-    # --- Config broadcast via pub/sub ---
+    # --- Centralised config storage ---
 
-    async def publish_config(self, config_json: str) -> None:
-        """Publish config update to all instances."""
-        channel = self._key(_CONFIG_CHANNEL)
-        payload = json.dumps({
-            "source": self._instance_id,
-            "config": config_json,
-            "timestamp": time.time(),
-        })
-        await self._redis.publish(channel, payload)
-        logger.info(f"Config published to Redis channel by instance {self._instance_id}")
+    async def save_config(self, config_json: str) -> None:
+        key = self._key("config")
+        await self._redis.set(key, config_json)
+        logger.info("Config saved to Redis")
 
-    async def subscribe_config(self, callback: Callable[[str], None]) -> None:
-        """Subscribe to config updates from other instances."""
-        import redis.asyncio as aioredis
-
-        channel = self._key(_CONFIG_CHANNEL)
-        self._pubsub = self._redis.pubsub()
-        await self._pubsub.subscribe(channel)
-
-        async def _listener():
-            try:
-                async for message in self._pubsub.listen():
-                    if message["type"] != "message":
-                        continue
-                    try:
-                        payload = json.loads(message["data"])
-                        # Skip messages from self
-                        if payload.get("source") == self._instance_id:
-                            continue
-                        config_json = payload.get("config", "")
-                        if config_json:
-                            callback(config_json)
-                            logger.info(
-                                f"Config update received from instance {payload.get('source')}"
-                            )
-                    except (json.JSONDecodeError, KeyError) as e:
-                        logger.warning(f"Invalid config broadcast message: {e}")
-            except asyncio.CancelledError:
-                pass
-
-        self._sub_task = asyncio.create_task(_listener())
-        logger.info(f"Subscribed to config channel: {channel}")
-
-    async def unsubscribe_config(self) -> None:
-        """Stop config subscription."""
-        if self._sub_task and not self._sub_task.done():
-            self._sub_task.cancel()
-        if self._pubsub:
-            await self._pubsub.unsubscribe()
-            await self._pubsub.close()
-            self._pubsub = None
-        logger.info("Config subscription stopped")
+    async def load_config(self) -> Optional[str]:
+        key = self._key("config")
+        return await self._redis.get(key)
 
     # --- Serialisation helpers ---
 

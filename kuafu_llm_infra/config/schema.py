@@ -147,7 +147,7 @@ class AlertConfig(BaseModel):
 class RedisConfig(BaseModel):
     """Redis connection configuration."""
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "llm_infra:"
+    key_prefix: str = "kuafu_llm_infra:"
 
 
 class StateBackendConfig(BaseModel):

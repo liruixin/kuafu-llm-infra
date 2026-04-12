@@ -13,6 +13,7 @@ from .registry import create_provider, register_provider, registered_types
 # Each module's @register_provider decorator runs at import time.
 from . import openai_provider as _openai  # noqa: F401
 from . import anthropic_provider as _anthropic  # noqa: F401
+from . import google_provider as _google  # noqa: F401
 
 __all__ = [
     "BaseProvider",

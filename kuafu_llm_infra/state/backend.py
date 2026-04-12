@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, List, Callable
+from typing import Optional, List
 
 
 # ============================================================================
@@ -189,15 +189,11 @@ class StateBackend(ABC):
     async def get_aggregated_stats(self, model: str, provider: str) -> AggregatedStats:
         ...
 
-    # --- Config broadcast (no-op for memory backend) ---
-    async def publish_config(self, config_json: str) -> None:
-        """Publish config update to other instances. No-op for memory backend."""
+    # --- Centralised config storage ---
+    async def save_config(self, config_json: str) -> None:
+        """Save config JSON to shared storage. No-op for memory backend."""
         pass
 
-    async def subscribe_config(self, callback: Callable[[str], None]) -> None:
-        """Subscribe to config updates from other instances. No-op for memory backend."""
-        pass
-
-    async def unsubscribe_config(self) -> None:
-        """Stop config subscription. No-op for memory backend."""
-        pass
+    async def load_config(self) -> Optional[str]:
+        """Load config JSON from shared storage. Returns None if not found."""
+        return None
