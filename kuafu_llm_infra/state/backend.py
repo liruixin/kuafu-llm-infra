@@ -71,6 +71,8 @@ class ScoreCard:
     probe_ttft_ms: float = 0.0
     probe_valid: bool = True
     probe_time: float = 0.0
+    probe_consecutive_failures: int = 0   # 探测连续失败计数（多实例共享）
+    probe_consecutive_successes: int = 0  # 探测连续成功计数（多实例共享）
 
     # --- Sliding window config ---
     window_size: int = 20
@@ -99,11 +101,26 @@ class ScoreCard:
             self.last_failure_time = outcome.timestamp
 
     def update_probe(self, result: ProbeResult) -> None:
-        """更新探测数据，同时将探测结果写入滑动窗口以影响成功率和稳定性评分。"""
-        self.health = result.health
+        """更新探测数据，同时将探测结果写入滑动窗口以影响成功率和稳定性评分。
+
+        探测连续成功/失败计数在此处维护，供 HealthChecker 判定阈值：
+        - 探测成功：consecutive_successes += 1, consecutive_failures 归零
+        - 探测失败：consecutive_failures += 1, consecutive_successes 归零
+
+        注意：health 字段由 HealthChecker 根据计数结果单独设置，不在此处覆盖。
+        """
         self.probe_ttft_ms = result.ttft_ms
         self.probe_valid = result.valid_response
         self.probe_time = result.timestamp
+
+        # 更新探测连续成功/失败计数（探测成功 = health=True 且 valid_response=True）
+        probe_success = result.health and result.valid_response
+        if probe_success:
+            self.probe_consecutive_successes += 1
+            self.probe_consecutive_failures = 0
+        else:
+            self.probe_consecutive_failures += 1
+            self.probe_consecutive_successes = 0
 
         # 探测结果也计入滑动窗口，使备用模型的成功率和稳定性有数据支撑
         self.push_request(RequestOutcome(

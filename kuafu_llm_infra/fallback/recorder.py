@@ -112,7 +112,7 @@ class RequestRecorder:
         reason: str,
         detail: str,
     ) -> None:
-        """Record a failed request to scorer + metrics + alert."""
+        """Record a failed request to scorer + metrics."""
         model = ctx.canonical_model
         provider = ctx.provider_name
 
@@ -127,14 +127,6 @@ class RequestRecorder:
             m.STRATEGY_TRIGGERED,
             model=model, provider=provider, strategy=reason,
             **ctx.labels,
-        )
-
-        self.send_alert(
-            "warning",
-            f"provider_degraded:{reason}",
-            f"Provider {provider} degraded for model {model}: {detail}",
-            provider=provider,
-            model=model,
         )
 
     # ------------------------------------------------------------------

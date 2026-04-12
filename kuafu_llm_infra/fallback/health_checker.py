@@ -4,6 +4,11 @@ Background health checker and speed prober.
 Periodically sends minimal requests to each (model, provider) pair
 to determine health status and measure TTFT. Results are written
 to the state backend and exposed via metrics.
+
+健康判定逻辑（基于 ScoreCard 共享计数，多实例安全）：
+- 连续探测失败次数 >= failure_threshold → 标记不可用 (health=False) 并触发告警
+- 标记不可用后，连续探测成功次数 >= recovery_threshold → 恢复可用 (health=True)
+- 单次探测失败不会改变健康状态
 """
 
 from __future__ import annotations
@@ -115,7 +120,13 @@ class HealthChecker:
         provider_name: str,
         actual_model_id: str,
     ) -> None:
-        """Probe a single (model, provider) pair."""
+        """探测单个 (model, provider)。
+
+        使用 ScoreCard 中的共享计数（probe_consecutive_failures / probe_consecutive_successes）
+        判断是否达到阈值，确保多实例部署下计数一致：
+        - 连续失败 >= failure_threshold → 标记不可用并告警
+        - 不可用状态下连续成功 >= recovery_threshold → 恢复可用
+        """
         adapter = self._adapters.get(provider_name)
         if not adapter:
             return
@@ -141,13 +152,14 @@ class HealthChecker:
 
             # 无实际内容视为探测失败（可能是空响应、内容被过滤等）
             if not has_content:
-                reason = "no_content"
                 if first_token_time is not None:
                     reason = "empty_content (stream received but no visible content after processing)"
                 else:
                     reason = "empty_response (no chunks received)"
                 raise ValueError(reason)
 
+            # ---- 探测成功 ----
+            # 先写入 ProbeResult（health=True），update_probe 会自动更新共享计数
             result = ProbeResult(
                 provider=provider_name,
                 model=canonical_model,
@@ -156,41 +168,75 @@ class HealthChecker:
                 valid_response=True,
                 timestamp=time.time(),
             )
+            card = await self._state.get_score_card(canonical_model, provider_name)
+            was_unhealthy = not card.health
+            card.update_probe(result)
+
+            # 根据共享计数判断是否恢复
+            if was_unhealthy:
+                if card.probe_consecutive_successes >= hc.recovery_threshold:
+                    card.health = True
+                    logger.info(
+                        f"Probe ({canonical_model}, {provider_name}): "
+                        f"连续成功 {card.probe_consecutive_successes} 次，恢复可用"
+                    )
+                else:
+                    # 还在恢复中，保持不可用状态
+                    card.health = False
+                    logger.info(
+                        f"Probe ({canonical_model}, {provider_name}): "
+                        f"探测成功，恢复中 "
+                        f"({card.probe_consecutive_successes}/{hc.recovery_threshold})"
+                    )
+            else:
+                card.health = True
 
             await self._state.set_probe_result(canonical_model, provider_name, result)
-            card = await self._state.get_score_card(canonical_model, provider_name)
-            card.update_probe(result)
             await self._state.update_score_card(canonical_model, provider_name, card)
 
-            self._metrics.set(m.PROVIDER_HEALTH, 1.0, provider=provider_name)
+            self._metrics.set(
+                m.PROVIDER_HEALTH, 1.0 if card.health else 0.0,
+                provider=provider_name,
+            )
             self._metrics.observe(m.PROBE_TTFT, ttft_ms / 1000.0, provider=provider_name)
             self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="success")
 
             logger.debug(
                 f"Probe done: ({canonical_model}, {provider_name}) "
-                f"healthy, ttft={ttft_ms:.0f}ms"
+                f"healthy={card.health}, ttft={ttft_ms:.0f}ms"
             )
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            # ---- 探测失败 ----
+            # 写入 ProbeResult（health=False），update_probe 会自动更新共享计数
             result = ProbeResult(
                 provider=provider_name,
                 model=canonical_model,
                 health=False,
                 timestamp=time.time(),
             )
-            await self._state.set_probe_result(canonical_model, provider_name, result)
             card = await self._state.get_score_card(canonical_model, provider_name)
+            was_healthy = card.health
             card.update_probe(result)
+
+            # 根据共享计数判断是否标记不可用
+            if card.probe_consecutive_failures >= hc.failure_threshold:
+                card.health = False
+            # 未达阈值则保持当前 health 不变（card.health 未被覆盖）
+
+            await self._state.set_probe_result(canonical_model, provider_name, result)
             await self._state.update_score_card(canonical_model, provider_name, card)
 
-            self._metrics.set(m.PROVIDER_HEALTH, 0.0, provider=provider_name)
+            self._metrics.set(
+                m.PROVIDER_HEALTH, 1.0 if card.health else 0.0,
+                provider=provider_name,
+            )
             self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="error")
 
-            # 探测失败日志：输出异常类型 + 详情，避免某些 SDK 异常 str() 为空
+            # 探测失败日志：输出异常类型 + 详情
             error_detail = str(e) or repr(e) or "(no detail)"
-            # 附加异常属性（HTTP status_code / response body 等），帮助定位问题
             extra_parts = []
             for attr in ("status_code", "status", "code", "response"):
                 val = getattr(e, attr, None)
@@ -198,16 +244,30 @@ class HealthChecker:
                     extra_parts.append(f"{attr}={val}")
             if extra_parts:
                 error_detail = f"{error_detail} ({', '.join(extra_parts)})"
-            logger.warning(
-                f"Probe ({canonical_model}, {provider_name}): "
-                f"failed - [{type(e).__name__}] {error_detail}"
-            )
 
-            if self._alert_dispatcher:
-                self._alert_dispatcher.dispatch(AlertEvent(
-                    level="warning",
-                    title="probe_failed",
-                    message=f"Probe failed for {canonical_model} @ {provider_name}: [{type(e).__name__}] {error_detail}",
-                    provider=provider_name,
-                    model=canonical_model,
-                ))
+            if card.probe_consecutive_failures < hc.failure_threshold:
+                # 未达阈值，仅记录日志
+                logger.warning(
+                    f"Probe ({canonical_model}, {provider_name}): "
+                    f"失败 ({card.probe_consecutive_failures}/{hc.failure_threshold}) "
+                    f"- [{type(e).__name__}] {error_detail}"
+                )
+            else:
+                # 达到阈值，记录日志 + 发送告警（仅在状态从可用变为不可用时）
+                logger.error(
+                    f"Probe ({canonical_model}, {provider_name}): "
+                    f"连续失败 {card.probe_consecutive_failures} 次，标记不可用 "
+                    f"- [{type(e).__name__}] {error_detail}"
+                )
+                if was_healthy and self._alert_dispatcher:
+                    self._alert_dispatcher.dispatch(AlertEvent(
+                        level="critical",
+                        title="provider_marked_unhealthy",
+                        message=(
+                            f"({canonical_model}, {provider_name}) 连续探测失败 "
+                            f"{card.probe_consecutive_failures} 次，已标记为不可用。"
+                            f"最近错误: [{type(e).__name__}] {error_detail}"
+                        ),
+                        provider=provider_name,
+                        model=canonical_model,
+                    ))
