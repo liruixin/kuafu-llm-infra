@@ -244,6 +244,7 @@ class FallbackEngine:
         chain_start = time.monotonic()
         last_error: Optional[Exception] = None
         attempt = [0]  # 使用列表在生成器和调用方之间共享计数
+        failure_details: List[str] = []  # 收集每次失败的摘要，用于告警
 
         # 4. 按模型链顺序依次尝试，deadline 自动管理总超时
         async for adapter, timeout in self._iter_candidates(strategy_cfg, chain, ctx, attempt):
@@ -309,6 +310,9 @@ class FallbackEngine:
                         ctx, "total_timeout", f"timeout after {duration:.1f}s",
                     )
                     last_error = TimeoutError(f"Provider {ctx.provider_name} timed out")
+                    failure_details.append(
+                        f"#{attempt[0]} {ctx.provider_name} → 超时 ({duration:.1f}s)"
+                    )
                     break  # 跳出重试循环，切换提供商
 
                 except StrategyTriggered as e:
@@ -323,6 +327,9 @@ class FallbackEngine:
                         ctx, e.event.strategy, str(e.event.detail),
                     )
                     last_error = e
+                    failure_details.append(
+                        f"#{attempt[0]} {ctx.provider_name} → {e.event.strategy} ({duration:.2f}s)"
+                    )
                     break  # 跳出重试循环，切换提供商
 
                 except Exception as e:
@@ -337,6 +344,9 @@ class FallbackEngine:
                         remaining = strategy_cfg.timeout.total - (time.monotonic() - chain_start)
                         if remaining <= 0:
                             last_error = e
+                            failure_details.append(
+                                f"#{attempt[0]} {ctx.provider_name} → [{type(e).__name__}] {e} ({duration:.2f}s)"
+                            )
                             break
 
                         timeout = min(strategy_cfg.timeout.per_request, remaining)
@@ -368,6 +378,9 @@ class FallbackEngine:
                     )
                     await self._recorder.record_failure(ctx, "error", str(e))
                     last_error = e
+                    failure_details.append(
+                        f"#{attempt[0]} {ctx.provider_name} → [{type(e).__name__}] {e} ({duration:.2f}s)"
+                    )
                     break  # 跳出重试循环，切换提供商
 
         # 8. 所有提供商耗尽或 deadline 到期，发送告警并抛异常
@@ -377,9 +390,16 @@ class FallbackEngine:
             f"{attempt[0]}次尝试, 总耗时={total_duration:.2f}s, "
             f"最后错误={last_error}"
         )
+        detail_block = ""
+        if failure_details:
+            detail_block = "\n\n失败明细:\n" + "\n".join(f"  {d}" for d in failure_details)
         self._recorder.send_alert(
-            "critical", "all_providers_exhausted",
-            f"All providers exhausted for business_key={ctx.business_key}",
+            "critical", "所有提供商耗尽",
+            f"模型链 {' → '.join(chain)} 全部失败，"
+            f"共尝试 {attempt[0]} 次，总耗时 {total_duration:.2f}s。"
+            f"最后错误: {last_error}{detail_block}",
+            business_key=ctx.business_key,
+            labels=ctx.labels,
         )
         raise AllProvidersExhausted(
             f"No provider available for {ctx.business_key}. Last error: {last_error}"
@@ -435,6 +455,7 @@ class FallbackEngine:
         chain_start = time.monotonic()
         last_error: Optional[Exception] = None
         attempt = [0]
+        failure_details: List[str] = []  # 收集每次失败的摘要，用于告警
 
         # 4. 按模型链顺序依次尝试，deadline 自动管理总超时
         async for adapter, timeout in self._iter_candidates(strategy_cfg, chain, ctx, attempt):
@@ -484,6 +505,9 @@ class FallbackEngine:
                             ctx, e.event.strategy, str(e.event.detail),
                         )
                         last_error = e
+                        failure_details.append(
+                            f"#{attempt[0]} {ctx.provider_name} → {e.event.strategy} ({duration:.2f}s)"
+                        )
                     else:
                         # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
                         logger.warning(
@@ -511,6 +535,9 @@ class FallbackEngine:
                         remaining = strategy_cfg.timeout.total - (time.monotonic() - chain_start)
                         if remaining <= 0:
                             last_error = e
+                            failure_details.append(
+                                f"#{attempt[0]} {ctx.provider_name} → [{type(e).__name__}] {e} ({duration:.2f}s)"
+                            )
                             break
 
                         timeout = min(strategy_cfg.timeout.per_request, remaining)
@@ -553,6 +580,9 @@ class FallbackEngine:
                     )
                     await self._recorder.record_failure(ctx, "error", str(e))
                     last_error = e
+                    failure_details.append(
+                        f"#{attempt[0]} {ctx.provider_name} → [{type(e).__name__}] {e} ({duration:.2f}s)"
+                    )
                     break  # 跳出重试循环，切换提供商
 
         # 7. 所有提供商耗尽或 deadline 到期，发送告警并抛异常
@@ -562,9 +592,16 @@ class FallbackEngine:
             f"{attempt[0]}次尝试, 总耗时={total_duration:.2f}s, "
             f"最后错误={last_error}"
         )
+        detail_block = ""
+        if failure_details:
+            detail_block = "\n\n失败明细:\n" + "\n".join(f"  {d}" for d in failure_details)
         self._recorder.send_alert(
-            "critical", "all_providers_exhausted",
-            f"All providers exhausted for business_key={ctx.business_key}",
+            "critical", "所有提供商耗尽",
+            f"模型链 {' → '.join(chain)} 全部失败，"
+            f"共尝试 {attempt[0]} 次，总耗时 {total_duration:.2f}s。"
+            f"最后错误: {last_error}{detail_block}",
+            business_key=ctx.business_key,
+            labels=ctx.labels,
         )
         raise AllProvidersExhausted(
             f"No provider available for {ctx.business_key}. Last error: {last_error}"

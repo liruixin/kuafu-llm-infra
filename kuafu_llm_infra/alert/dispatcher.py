@@ -39,14 +39,33 @@ class AlertDispatcher:
         self._task = asyncio.get_event_loop().create_task(self._run())
 
     async def stop(self) -> None:
-        """Cancel the background consumer task."""
-        if self._task is not None:
-            self._task.cancel()
+        """优雅关闭：先排空队列中待发送的告警，再取消后台任务。"""
+        if self._task is None:
+            return
+
+        # 排空队列中所有待发送的告警
+        while not self._queue.empty():
             try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+                event = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if not self._rules.should_send(event):
+                continue
+            for channel in self._channels:
+                try:
+                    await channel.send(event)
+                except Exception:
+                    logger.exception(
+                        "Failed to send alert via %s during shutdown",
+                        type(channel).__name__,
+                    )
+
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        self._task = None
 
     async def _run(self) -> None:
         """Consume events from the queue and dispatch to channels."""

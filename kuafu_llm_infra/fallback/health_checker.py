@@ -262,7 +262,7 @@ class HealthChecker:
                 if was_healthy and self._alert_dispatcher:
                     self._alert_dispatcher.dispatch(AlertEvent(
                         level="critical",
-                        title="provider_marked_unhealthy",
+                        title="提供商标记不可用",
                         message=(
                             f"({canonical_model}, {provider_name}) 连续探测失败 "
                             f"{card.probe_consecutive_failures} 次，已标记为不可用。"

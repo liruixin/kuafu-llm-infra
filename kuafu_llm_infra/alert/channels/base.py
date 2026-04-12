@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, Optional
 import time
 
 
@@ -18,6 +18,8 @@ class AlertEvent:
     message: str
     provider: Optional[str] = None
     model: Optional[str] = None
+    business_key: Optional[str] = None
+    labels: Dict[str, str] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
 
 

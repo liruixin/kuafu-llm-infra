@@ -8,7 +8,7 @@ instead of operating on metrics and alert channels directly.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from ..types import RequestContext, TokenUsage
 from ..metrics.collector import MetricsCollector, NoopCollector
@@ -140,6 +140,8 @@ class RequestRecorder:
         message: str,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        business_key: Optional[str] = None,
+        labels: Optional[Dict[str, str]] = None,
     ) -> None:
         """Send an alert event through the dispatcher."""
         if self._alert:
@@ -149,4 +151,6 @@ class RequestRecorder:
                 message=message,
                 provider=provider,
                 model=model,
+                business_key=business_key,
+                labels=labels or {},
             ))
