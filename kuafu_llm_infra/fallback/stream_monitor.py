@@ -100,23 +100,23 @@ class StreamMonitor:
                 if chunk.usage:
                     final_usage = chunk.usage
 
-                # # Run all strategies
-                # for strategy in strategies:
-                #     event = strategy.on_chunk(
-                #         content=content,
-                #         is_first=first_chunk,
-                #         elapsed=elapsed,
-                #         total_tokens=token_estimate,
-                #     )
-                #     if event:
-                #         self._metrics.inc(
-                #             m.STRATEGY_TRIGGERED,
-                #             model=ctx.canonical_model,
-                #             provider=ctx.provider_name,
-                #             strategy=event.strategy,
-                #             **ctx.labels,
-                #         )
-                #         raise StrategyTriggered(event)
+                # Run all strategies
+                for strategy in strategies:
+                    event = strategy.on_chunk(
+                        content=content,
+                        is_first=first_chunk,
+                        elapsed=elapsed,
+                        total_tokens=token_estimate,
+                    )
+                    if event:
+                        self._metrics.inc(
+                            m.STRATEGY_TRIGGERED,
+                            model=ctx.canonical_model,
+                            provider=ctx.provider_name,
+                            strategy=event.strategy,
+                            **ctx.labels,
+                        )
+                        raise StrategyTriggered(event)
 
                 if first_chunk and content:
                     ttft = elapsed

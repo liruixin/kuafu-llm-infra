@@ -242,6 +242,7 @@ class FallbackEngine:
 
                 # 7. 成功：记录指标，返回结果
                 tps = response.usage.completion_tokens / duration if duration > 0 else 0
+                logger.info(f"总token: {response.usage.completion_tokens}, 总耗时: {duration:.2f}s, tps: {tps}")
                 await self._recorder.record_success(
                     ctx,
                     duration=duration,
