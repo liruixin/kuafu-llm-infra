@@ -95,6 +95,12 @@ class RequestRecorder:
                     model=model, provider=provider,
                     **ctx.labels,
                 )
+            if usage.cached_tokens > 0:
+                self._metrics.inc(
+                    m.CACHED_TOKENS, usage.cached_tokens,
+                    model=model, provider=provider,
+                    **ctx.labels,
+                )
 
     # ------------------------------------------------------------------
     # Failure recording

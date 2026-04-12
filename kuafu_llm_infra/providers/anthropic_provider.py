@@ -170,10 +170,12 @@ class AnthropicProvider(BaseProvider):
 
         usage = TokenUsage()
         if resp.usage:
+            cached = getattr(resp.usage, "cache_read_input_tokens", 0) or 0
             usage = TokenUsage(
                 prompt_tokens=resp.usage.input_tokens,
                 completion_tokens=resp.usage.output_tokens,
                 total_tokens=resp.usage.input_tokens + resp.usage.output_tokens,
+                cached_tokens=cached,
             )
 
         return ChatResponse(
@@ -222,12 +224,14 @@ class AnthropicProvider(BaseProvider):
 
         input_tokens = 0
         output_tokens = 0
+        cached_tokens = 0
         current_tool_call: Optional[ToolCall] = None
 
         async for event in stream:
             if event.type == "message_start":
                 if hasattr(event.message, "usage") and event.message.usage:
                     input_tokens = event.message.usage.input_tokens
+                    cached_tokens = getattr(event.message.usage, "cache_read_input_tokens", 0) or 0
                 continue
 
             if event.type == "content_block_start":
@@ -270,6 +274,7 @@ class AnthropicProvider(BaseProvider):
                     prompt_tokens=input_tokens,
                     completion_tokens=output_tokens,
                     total_tokens=input_tokens + output_tokens,
+                    cached_tokens=cached_tokens,
                 )
                 yield StreamChunk(
                     content="",

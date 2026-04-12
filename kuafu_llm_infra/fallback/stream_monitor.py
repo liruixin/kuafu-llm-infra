@@ -115,12 +115,6 @@ class StreamMonitor:
 
                 if first_chunk and content:
                     ttft = elapsed
-                    self._metrics.observe(
-                        m.TTFT, ttft,
-                        model=ctx.canonical_model,
-                        provider=ctx.provider_name,
-                        **ctx.labels,
-                    )
 
                 first_chunk = False
                 content_buffer += content

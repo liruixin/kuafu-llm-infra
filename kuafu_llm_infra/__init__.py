@@ -35,10 +35,12 @@ __version__ = "0.1.0"
 
 from .gateway import LLMClient, create_client
 from .types import TokenUsage, RequestContext
+from .logging_setup import setup_logging
 
 __all__ = [
     "LLMClient",
     "create_client",
     "TokenUsage",
     "RequestContext",
+    "setup_logging",
 ]

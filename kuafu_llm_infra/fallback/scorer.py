@@ -46,6 +46,13 @@ class ScoredProvider:
     reason: str = ""
 
 
+@dataclass
+class RankResult:
+    """rank_providers 的返回结果，包含可用和被排除的提供商。"""
+    ranked: list          # List[ScoredProvider]  — 可用提供商，按分数降序
+    excluded: list        # List[ScoredProvider]  — 被排除的提供商（unhealthy/cooldown）
+
+
 class Scorer:
     """Computes and maintains provider scores."""
 
@@ -67,33 +74,35 @@ class Scorer:
         self,
         model: str,
         entries: List[ModelProviderEntry],
-    ) -> List[ScoredProvider]:
+    ) -> RankResult:
         """
         Rank provider entries by composite score, descending.
 
-        Providers that are unhealthy or in cooldown are excluded.
+        Returns RankResult with ranked (available) and excluded providers.
         """
-        results: List[ScoredProvider] = []
+        ranked: List[ScoredProvider] = []
+        excluded: List[ScoredProvider] = []
 
         for entry in entries:
             key = adapter_key(entry.provider, entry.endpoint)
             card = await self._state.get_score_card(model, key)
             score, reason = self._compute_score(entry, card)
 
-            if score <= 0:
-                logger.debug(f"[scorer] {key} excluded for {model}: {reason}")
-                continue
-
-            results.append(ScoredProvider(
+            sp = ScoredProvider(
                 provider_name=key,
                 entry=entry,
                 score=score,
                 reason=reason,
-            ))
-            self._metrics.set(m.PROVIDER_SCORE, score, model=model, provider=key)
+            )
 
-        results.sort(key=lambda x: x.score, reverse=True)
-        return results
+            if score <= 0:
+                excluded.append(sp)
+            else:
+                ranked.append(sp)
+                self._metrics.set(m.PROVIDER_SCORE, score, model=model, provider=key)
+
+        ranked.sort(key=lambda x: x.score, reverse=True)
+        return RankResult(ranked=ranked, excluded=excluded)
 
     async def record_success(
         self,

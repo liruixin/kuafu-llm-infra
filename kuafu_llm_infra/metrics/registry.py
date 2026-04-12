@@ -84,11 +84,10 @@ OUTPUT_TOKENS = MetricDef(
     "Total output (completion) tokens",
 )
 
-FALLBACK_TOTAL = MetricDef(
-    "llm_fallback_total",
+CACHED_TOKENS = MetricDef(
+    "llm_cached_tokens_total",
     MetricKind.COUNTER,
-    "Total fallback events",
-    extra_labels=("from_provider", "to_provider", "reason"),
+    "Total cached input tokens (prompt cache hits)",
 )
 
 STRATEGY_TRIGGERED = MetricDef(
@@ -145,7 +144,7 @@ ALL_METRICS: tuple[MetricDef, ...] = (
     TOKENS_PER_SECOND,
     INPUT_TOKENS,
     OUTPUT_TOKENS,
-    FALLBACK_TOTAL,
+    CACHED_TOKENS,
     STRATEGY_TRIGGERED,
     PROVIDER_HEALTH,
     PROVIDER_SCORE,
