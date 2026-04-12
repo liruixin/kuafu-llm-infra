@@ -44,14 +44,24 @@ class OpenAIProvider(BaseProvider):
         max_tokens: int = 5,
         timeout: float = 10.0,
     ) -> AsyncIterator[StreamChunk]:
-        """OpenAI 探测：简单流式请求，<think> 剥离由 chat_stream 统一处理。"""
-        async for chunk in self.chat_stream(
+        """OpenAI 探测：原始流式请求，不做 <think> 剥离（探测只关心是否有响应）。"""
+        coro = self._client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=max_tokens,
-            timeout=timeout,
-        ):
-            yield chunk
+            stream=True,
+        )
+        if timeout is not None:
+            stream = await asyncio.wait_for(coro, timeout=timeout)
+        else:
+            stream = await coro
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            text = chunk.choices[0].delta.content or ""
+            if text:
+                yield StreamChunk(content=text, raw=chunk)
 
     async def chat(
         self,

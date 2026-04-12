@@ -126,7 +126,7 @@ class HealthChecker:
         has_content = False
 
         try:
-            logger.debug(f"Probe start: ({canonical_model}, {provider_name})")
+            logger.debug(f"Probe start: ({canonical_model}, {provider_name}, max_tokens={hc.probe_max_tokens}) ")
             async for chunk in adapter.probe(
                 model=actual_model_id,
                 max_tokens=hc.probe_max_tokens,
@@ -139,12 +139,21 @@ class HealthChecker:
 
             ttft_ms = ((first_token_time - start) * 1000) if first_token_time else 0.0
 
+            # 无实际内容视为探测失败（可能是空响应、内容被过滤等）
+            if not has_content:
+                reason = "no_content"
+                if first_token_time is not None:
+                    reason = "empty_content (stream received but no visible content after processing)"
+                else:
+                    reason = "empty_response (no chunks received)"
+                raise ValueError(reason)
+
             result = ProbeResult(
                 provider=provider_name,
                 model=canonical_model,
                 health=True,
                 ttft_ms=ttft_ms,
-                valid_response=has_content,
+                valid_response=True,
                 timestamp=time.time(),
             )
 
