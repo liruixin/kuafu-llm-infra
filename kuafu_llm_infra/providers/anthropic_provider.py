@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from anthropic import AsyncAnthropic
 
 from ..types import TokenUsage
-from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall
+from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall, ToolCallFunction
 from .registry import register_provider
 
 
@@ -164,8 +164,10 @@ class AnthropicProvider(BaseProvider):
                 tool_calls.append(ToolCall(
                     id=block.id,
                     type="function",
-                    function_name=block.name,
-                    function_arguments=json.dumps(block.input) if isinstance(block.input, dict) else str(block.input),
+                    function=ToolCallFunction(
+                        name=block.name,
+                        arguments=json.dumps(block.input) if isinstance(block.input, dict) else str(block.input),
+                    ),
                 ))
 
         usage = TokenUsage()
@@ -240,8 +242,10 @@ class AnthropicProvider(BaseProvider):
                     current_tool_call = ToolCall(
                         id=block.id,
                         type="function",
-                        function_name=block.name,
-                        function_arguments="",
+                        function=ToolCallFunction(
+                            name=block.name,
+                            arguments="",
+                        ),
                     )
                 continue
 
@@ -252,14 +256,16 @@ class AnthropicProvider(BaseProvider):
                         raw=event,
                     )
                 elif hasattr(event.delta, "partial_json") and current_tool_call:
-                    current_tool_call.function_arguments += event.delta.partial_json
+                    current_tool_call.function.arguments += event.delta.partial_json
                     yield StreamChunk(
                         content="",
                         tool_calls=[ToolCall(
                             id=current_tool_call.id,
                             type="function",
-                            function_name=current_tool_call.function_name,
-                            function_arguments=event.delta.partial_json,
+                            function=ToolCallFunction(
+                                name=current_tool_call.function.name,
+                                arguments=event.delta.partial_json,
+                            ),
                         )],
                         raw=event,
                     )

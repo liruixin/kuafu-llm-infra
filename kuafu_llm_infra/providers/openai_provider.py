@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from openai import AsyncOpenAI
 
 from ..types import TokenUsage
-from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall
+from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall, ToolCallFunction
 from .registry import register_provider
 
 
@@ -114,8 +114,10 @@ class OpenAIProvider(BaseProvider):
                 ToolCall(
                     id=tc.id,
                     type=tc.type or "function",
-                    function_name=tc.function.name or "",
-                    function_arguments=tc.function.arguments or "",
+                    function=ToolCallFunction(
+                        name=tc.function.name or "",
+                        arguments=tc.function.arguments or "",
+                    ),
                 )
                 for tc in choice.message.tool_calls
             ]
@@ -222,8 +224,11 @@ class OpenAIProvider(BaseProvider):
                     ToolCall(
                         id=tc.id or "",
                         type=tc.type or "function",
-                        function_name=tc.function.name if tc.function and tc.function.name else "",
-                        function_arguments=tc.function.arguments if tc.function and tc.function.arguments else "",
+                        function=ToolCallFunction(
+                            name=tc.function.name if tc.function and tc.function.name else "",
+                            arguments=tc.function.arguments if tc.function and tc.function.arguments else "",
+                        ),
+                        index=tc.index,
                     )
                     for tc in delta.tool_calls
                 ]

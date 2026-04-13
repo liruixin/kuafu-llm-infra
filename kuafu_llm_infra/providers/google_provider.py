@@ -16,7 +16,7 @@ from google import genai
 from google.genai import types
 
 from ..types import TokenUsage
-from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall
+from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall, ToolCallFunction
 from .registry import register_provider
 
 logger = logging.getLogger("kuafu_llm_infra.providers.google")
@@ -272,9 +272,11 @@ class GoogleProvider(BaseProvider):
                     tool_calls.append(ToolCall(
                         id=getattr(fc, "id", None) or str(uuid.uuid4()),
                         type="function",
-                        function_name=fc.name,
-                        function_arguments=json.dumps(
-                            dict(fc.args) if fc.args else {},
+                        function=ToolCallFunction(
+                            name=fc.name,
+                            arguments=json.dumps(
+                                dict(fc.args) if fc.args else {},
+                            ),
                         ),
                     ))
 
@@ -352,9 +354,11 @@ class GoogleProvider(BaseProvider):
                         tool_calls=[ToolCall(
                             id=tc_id,
                             type="function",
-                            function_name=fc.name,
-                            function_arguments=json.dumps(
-                                dict(fc.args) if fc.args else {},
+                            function=ToolCallFunction(
+                                name=fc.name,
+                                arguments=json.dumps(
+                                    dict(fc.args) if fc.args else {},
+                                ),
                             ),
                         )],
                         raw=chunk,

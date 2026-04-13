@@ -62,15 +62,24 @@ logger = logging.getLogger("kuafu_llm_infra.gateway")
 # OpenAI-compatible response wrappers
 # ============================================================================
 
-class _Choice:
-    def __init__(self, content: str, finish_reason: str = "stop",
+class _Delta:
+    """Mimics ``chunk.choices[0].delta`` in OpenAI streaming."""
+    def __init__(self, content: Optional[str] = None,
                  tool_calls: Optional[List[ToolCall]] = None) -> None:
-        self.message = _Message(content, tool_calls=tool_calls)
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _StreamChoice:
+    """Mimics ``chunk.choices[0]`` in OpenAI streaming."""
+    def __init__(self, delta: _Delta, finish_reason: Optional[str] = None) -> None:
+        self.delta = delta
         self.finish_reason = finish_reason
         self.index = 0
 
 
 class _Message:
+    """Mimics ``response.choices[0].message``."""
     def __init__(self, content: str,
                  tool_calls: Optional[List[ToolCall]] = None) -> None:
         self.role = "assistant"
@@ -78,26 +87,47 @@ class _Message:
         self.tool_calls = tool_calls
 
 
+class _Choice:
+    """Mimics ``response.choices[0]`` for non-streaming."""
+    def __init__(self, content: str, finish_reason: str = "stop",
+                 tool_calls: Optional[List[ToolCall]] = None) -> None:
+        self.message = _Message(content, tool_calls=tool_calls)
+        self.finish_reason = finish_reason
+        self.index = 0
+
+
 class _StreamChunkWrapper:
-    """Wraps StreamChunk to be more OpenAI-like."""
+    """Wraps StreamChunk to match OpenAI SDK streaming chunk structure.
+
+    Exposes ``choices[0].delta.content``, ``choices[0].delta.tool_calls``,
+    ``choices[0].finish_reason`` — identical to OpenAI SDK.
+    """
     def __init__(self, chunk: StreamChunk) -> None:
-        self.content = chunk.content
-        self.finish_reason = chunk.finish_reason
-        self.tool_calls = chunk.tool_calls
+        delta = _Delta(
+            content=chunk.content or None,
+            tool_calls=chunk.tool_calls,
+        )
+        self.choices = [_StreamChoice(
+            delta=delta,
+            finish_reason=chunk.finish_reason,
+        )]
+        self.usage = chunk.usage
         self.raw = chunk.raw
 
 
 class _CompletionResponse:
-    """OpenAI-compatible completion response."""
+    """OpenAI-compatible completion response.
+
+    Exposes ``choices[0].message.content``, ``choices[0].message.tool_calls``,
+    ``choices[0].finish_reason`` — identical to OpenAI SDK.
+    """
     def __init__(self, chat_response: ChatResponse) -> None:
-        self.content = chat_response.content
-        self.model = chat_response.model
-        self.tool_calls = chat_response.tool_calls
         self.choices = [_Choice(
             chat_response.content,
             chat_response.finish_reason,
             tool_calls=chat_response.tool_calls,
         )]
+        self.model = chat_response.model
         self.usage = chat_response.usage
         self.raw = chat_response.raw
 

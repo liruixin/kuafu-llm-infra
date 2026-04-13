@@ -9,7 +9,7 @@ engine, and strategies can work with any SDK uniformly.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from ..types import TokenUsage
@@ -29,12 +29,19 @@ class ChatMessage:
 
 
 @dataclass
+class ToolCallFunction:
+    """Function details within a tool call."""
+    name: str = ""
+    arguments: str = ""  # JSON string
+
+
+@dataclass
 class ToolCall:
     """A single tool/function call returned by the model."""
     id: str
     type: str = "function"
-    function_name: str = ""
-    function_arguments: str = ""  # JSON string
+    function: ToolCallFunction = field(default_factory=ToolCallFunction)
+    index: Optional[int] = None  # Stream delta index (OpenAI compatibility)
 
 
 @dataclass
@@ -147,7 +154,7 @@ class BaseProvider(ABC):
 
         When the model invokes a tool during streaming, chunks will
         carry ``tool_calls`` with incremental argument fragments. The
-        caller should concatenate ``function_arguments`` across chunks
+        caller should concatenate ``function.arguments`` across chunks
         sharing the same ``ToolCall.id`` to reconstruct the full JSON.
         """
         ...
