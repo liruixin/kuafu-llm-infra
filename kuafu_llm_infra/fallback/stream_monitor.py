@@ -89,8 +89,9 @@ class StreamMonitor:
 
             wait_start = time.monotonic()
             async for chunk in stream:
-                # chunk 刚从 SDK 到达，累计等待时间
-                model_wait_time += time.monotonic() - wait_start
+                # chunk 刚从 SDK 到达，记录精确到达时间
+                chunk_arrived_at = time.monotonic()
+                model_wait_time += chunk_arrived_at - wait_start
 
                 elapsed = time.monotonic() - start
                 content = chunk.content or ""
@@ -107,6 +108,7 @@ class StreamMonitor:
                         is_first=first_chunk,
                         elapsed=elapsed,
                         total_tokens=token_estimate,
+                        chunk_arrived_at=chunk_arrived_at,
                     )
                     if event:
                         self._metrics.inc(

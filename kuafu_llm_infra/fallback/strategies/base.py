@@ -53,6 +53,7 @@ class BaseStrategy(ABC):
         is_first: bool,
         elapsed: float,
         total_tokens: int,
+        chunk_arrived_at: Optional[float] = None,
     ) -> Optional[StrategyEvent]:
         """
         Called for each stream chunk.
@@ -62,6 +63,10 @@ class BaseStrategy(ABC):
             is_first: Whether this is the very first chunk.
             elapsed: Seconds since request start.
             total_tokens: Cumulative tokens received so far.
+            chunk_arrived_at: monotonic timestamp when chunk arrived from SDK,
+                excluding yield/caller processing overhead. Strategies that
+                measure inter-chunk gaps should use this instead of
+                ``time.monotonic()`` to avoid counting caller processing time.
 
         Returns:
             A StrategyEvent if anomaly detected, else None.

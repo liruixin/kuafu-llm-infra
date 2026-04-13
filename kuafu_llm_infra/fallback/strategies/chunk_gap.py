@@ -34,8 +34,9 @@ class ChunkGapStrategy(BaseStrategy):
         is_first: bool,
         elapsed: float,
         total_tokens: int,
+        chunk_arrived_at: Optional[float] = None,
     ) -> Optional[StrategyEvent]:
-        now = time.monotonic()
+        now = chunk_arrived_at if chunk_arrived_at is not None else time.monotonic()
         gap = now - self._last_chunk_time
         self._last_chunk_time = now
 

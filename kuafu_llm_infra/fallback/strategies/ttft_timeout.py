@@ -32,6 +32,7 @@ class TtftTimeoutStrategy(BaseStrategy):
         is_first: bool,
         elapsed: float,
         total_tokens: int,
+        chunk_arrived_at: Optional[float] = None,
     ) -> Optional[StrategyEvent]:
         if content:
             self._first_token_received = True

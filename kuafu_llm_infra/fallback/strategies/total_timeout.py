@@ -30,6 +30,7 @@ class TotalTimeoutStrategy(BaseStrategy):
         is_first: bool,
         elapsed: float,
         total_tokens: int,
+        chunk_arrived_at: Optional[float] = None,
     ) -> Optional[StrategyEvent]:
         # Not used in block mode, but satisfy interface
         return None
