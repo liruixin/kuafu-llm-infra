@@ -301,6 +301,9 @@ class LLMClient:
         其他实例会在下一次 pull 周期自动拿到新配置。
         """
         if isinstance(new_config, dict):
+            # 兼容带 llm_stability 外层包裹的格式
+            if "llm_stability" in new_config:
+                new_config = new_config["llm_stability"]
             new_config = LLMStabilityConfig(**new_config)
 
         new_config.validate_references()
@@ -322,6 +325,9 @@ class LLMClient:
                 raw = await self._state.load_config()
                 if raw is not None and raw != self._last_config_raw:
                     data = json.loads(raw)
+                    # 兼容带 llm_stability 外层包裹的格式
+                    if "llm_stability" in data:
+                        data = data["llm_stability"]
                     new_config = LLMStabilityConfig(**data)
                     new_config.validate_references()
                     self._apply_config(new_config)
