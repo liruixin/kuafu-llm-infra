@@ -39,7 +39,12 @@ class EmptyFrameStrategy(BaseStrategy):
         elapsed: float,
         total_tokens: int,
         chunk_arrived_at: Optional[float] = None,
+        is_thinking: bool = False,
     ) -> Optional[StrategyEvent]:
+        # 思考帧不算空帧
+        if is_thinking:
+            return None
+
         if content:
             self._has_content = True
             self._consecutive_empty = 0

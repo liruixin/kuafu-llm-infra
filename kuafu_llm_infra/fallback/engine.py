@@ -318,17 +318,18 @@ class FallbackEngine:
                 except StrategyTriggered as e:
                     # 策略触发（空响应、TTFT 超时等）：不重试，直接切换
                     duration = time.monotonic() - start
+                    detail_str = " | ".join(f"{k}={v}" for k, v in e.event.detail.items())
                     logger.warning(
                         f"[{business_key}]{tag} "
                         f"#{attempt[0]} {ctx.provider_name} → "
-                        f"{e.event.strategy} ({duration:.2f}s)"
+                        f"{e.event.strategy} ({duration:.2f}s) [{detail_str}]"
                     )
                     await self._recorder.record_failure(
                         ctx, e.event.strategy, str(e.event.detail),
                     )
                     last_error = e
                     failure_details.append(
-                        f"#{attempt[0]} {ctx.provider_name} → {e.event.strategy} ({duration:.2f}s)"
+                        f"#{attempt[0]} {ctx.provider_name} → {e.event.strategy} ({duration:.2f}s) [{detail_str}]"
                     )
                     break  # 跳出重试循环，切换提供商
 
@@ -494,26 +495,27 @@ class FallbackEngine:
                 except StrategyTriggered as e:
                     # 策略触发（TTFT 超时、空帧、慢速等）：不重试，根据阶段决定行为
                     duration = time.monotonic() - start
+                    detail_str = " | ".join(f"{k}={v}" for k, v in e.event.detail.items())
                     if e.event.action == StrategyAction.SWITCH:
                         # Phase 1（首 Token 前）：还没给用户返回内容，可以切换提供商
                         logger.warning(
                             f"[{business_key}]{tag} "
                             f"#{attempt[0]} {ctx.provider_name} → "
-                            f"{e.event.strategy} ({duration:.2f}s)"
+                            f"{e.event.strategy} ({duration:.2f}s) [{detail_str}]"
                         )
                         await self._recorder.record_failure(
                             ctx, e.event.strategy, str(e.event.detail),
                         )
                         last_error = e
                         failure_details.append(
-                            f"#{attempt[0]} {ctx.provider_name} → {e.event.strategy} ({duration:.2f}s)"
+                            f"#{attempt[0]} {ctx.provider_name} → {e.event.strategy} ({duration:.2f}s) [{detail_str}]"
                         )
                     else:
                         # Phase 2（内容流中）：已有内容返回给用户，不能切换，仅记录
                         logger.warning(
                             f"[{business_key}]{tag} "
                             f"#{attempt[0]} {ctx.provider_name} → "
-                            f"流中异常({e.event.strategy}, 不切换) ({duration:.2f}s)"
+                            f"流中异常({e.event.strategy}, 不切换) ({duration:.2f}s) [{detail_str}]"
                         )
                         await self._scorer.record_failure(
                             ctx.canonical_model, ctx.provider_name, e.event.strategy,

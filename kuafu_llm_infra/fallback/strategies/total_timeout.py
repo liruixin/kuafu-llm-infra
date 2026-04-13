@@ -31,6 +31,7 @@ class TotalTimeoutStrategy(BaseStrategy):
         elapsed: float,
         total_tokens: int,
         chunk_arrived_at: Optional[float] = None,
+        is_thinking: bool = False,
     ) -> Optional[StrategyEvent]:
         # Not used in block mode, but satisfy interface
         return None

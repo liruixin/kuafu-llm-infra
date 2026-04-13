@@ -359,6 +359,27 @@ class LLMClient:
         self._engine.update_config(new_config, self._adapters)
         self._health_checker.update_config(new_config, self._adapters)
 
+        # 重建 alert dispatcher（Redis 模式首次加载时初始配置为空，需要重建）
+        old_alert_channels = [
+            (type(ch).__name__, getattr(ch, '_webhook_url', getattr(ch, '_url', None)))
+            for ch in (self._alert_dispatcher._channels if self._alert_dispatcher else [])
+        ]
+        new_dispatcher = self._create_alert_dispatcher(new_config)
+        new_alert_channels = [
+            (type(ch).__name__, getattr(ch, '_webhook_url', getattr(ch, '_url', None)))
+            for ch in (new_dispatcher._channels if new_dispatcher else [])
+        ]
+        if old_alert_channels != new_alert_channels:
+            # 停掉旧的，启动新的
+            if self._alert_dispatcher and self._started:
+                asyncio.ensure_future(self._alert_dispatcher.stop())
+            self._alert_dispatcher = new_dispatcher
+            if self._started and self._alert_dispatcher:
+                self._alert_dispatcher.start()
+            self._engine._recorder._alert = self._alert_dispatcher
+            self._health_checker._alert_dispatcher = self._alert_dispatcher
+            logger.info(f"Alert dispatcher rebuilt: {new_alert_channels}")
+
         logger.info("Configuration applied")
 
     # ------------------------------------------------------------------

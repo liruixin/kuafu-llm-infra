@@ -187,6 +187,7 @@ class OpenAIProvider(BaseProvider):
             text = delta.content or ""
 
             # 处理 <think> 标签：跳过思考内容
+            is_thinking_frame = False
             if text:
                 if in_think:
                     # 正在思考块内，检查是否遇到 </think>
@@ -198,6 +199,7 @@ class OpenAIProvider(BaseProvider):
                             text = ""
                     else:
                         text = ""
+                        is_thinking_frame = True
                 elif "<think>" in text:
                     # 进入思考块
                     before = text.split("<think>", 1)[0]
@@ -208,6 +210,11 @@ class OpenAIProvider(BaseProvider):
                     else:
                         text = before
                         in_think = True
+                        if not text:
+                            is_thinking_frame = True
+            elif in_think:
+                # 原始 content 为空但处于思考阶段，也标记
+                is_thinking_frame = True
 
             delta_tool_calls = None
             if hasattr(delta, "tool_calls") and delta.tool_calls:
@@ -221,14 +228,15 @@ class OpenAIProvider(BaseProvider):
                     for tc in delta.tool_calls
                 ]
 
-            # 有实际内容或有 tool_calls 或有 usage 或有 finish_reason 时才 yield
-            if text or delta_tool_calls or usage or chunk.choices[0].finish_reason:
+            # 有实际内容、tool_calls、usage、finish_reason 或思考帧时 yield
+            if text or delta_tool_calls or usage or chunk.choices[0].finish_reason or is_thinking_frame:
                 yield StreamChunk(
                     content=text,
                     finish_reason=chunk.choices[0].finish_reason,
                     usage=usage,
                     tool_calls=delta_tool_calls,
                     raw=chunk,
+                    thinking=is_thinking_frame,
                 )
 
 

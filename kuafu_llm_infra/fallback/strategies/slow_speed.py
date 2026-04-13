@@ -40,7 +40,12 @@ class SlowSpeedStrategy(BaseStrategy):
         elapsed: float,
         total_tokens: int,
         chunk_arrived_at: Optional[float] = None,
+        is_thinking: bool = False,
     ) -> Optional[StrategyEvent]:
+        # 思考阶段无 content 输出，tps 无意义
+        if is_thinking:
+            return None
+
         if content:
             self._has_content = True
 

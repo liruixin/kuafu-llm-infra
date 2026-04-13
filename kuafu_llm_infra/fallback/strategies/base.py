@@ -54,6 +54,7 @@ class BaseStrategy(ABC):
         elapsed: float,
         total_tokens: int,
         chunk_arrived_at: Optional[float] = None,
+        is_thinking: bool = False,
     ) -> Optional[StrategyEvent]:
         """
         Called for each stream chunk.
@@ -67,6 +68,9 @@ class BaseStrategy(ABC):
                 excluding yield/caller processing overhead. Strategies that
                 measure inter-chunk gaps should use this instead of
                 ``time.monotonic()`` to avoid counting caller processing time.
+            is_thinking: Whether this chunk is from the model's thinking
+                phase (e.g. ``<think>`` tags). Strategies may skip certain
+                checks during thinking while keeping timers updated.
 
         Returns:
             A StrategyEvent if anomaly detected, else None.

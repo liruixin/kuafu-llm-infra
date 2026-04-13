@@ -56,6 +56,7 @@ class StreamChunk:
     usage: Optional[TokenUsage] = None  # Present on final chunk if SDK supports it
     tool_calls: Optional[List[ToolCall]] = None  # Incremental tool call deltas
     raw: Any = None
+    thinking: bool = False  # True when chunk is from model thinking phase (<think>)
 
 
 # ============================================================================

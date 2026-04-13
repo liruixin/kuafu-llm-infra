@@ -51,6 +51,7 @@ class StreamMonitor:
         *,
         timeout: Optional[float] = None,
     ) -> AsyncIterator[StreamChunk]:
+
         """
         Stream from adapter with real-time strategy monitoring.
 
@@ -66,6 +67,13 @@ class StreamMonitor:
         )
 
         sdk_timeout = timeout if timeout is not None else strategy_cfg.timeout.ttft + 5
+
+        # 日志前缀：[business_key] [label1=v1, label2=v2]
+        label_tag = ""
+        if ctx.labels:
+            parts = ", ".join(f"{k}={v}" for k, v in ctx.labels.items())
+            label_tag = f" [{parts}]"
+        log_prefix = f"[{ctx.business_key}] {ctx.provider_name}:{ctx.actual_model_id}{label_tag}"
 
         start = time.monotonic()
         token_estimate = 0
@@ -88,14 +96,81 @@ class StreamMonitor:
             )
 
             wait_start = time.monotonic()
-            async for chunk in stream:
+            stream_iter = stream.__aiter__()
+            # 逐帧超时：首帧用 TTFT 超时，后续帧用 chunk_gap 超时
+            chunk_gap_timeout = strategy_cfg.timeout.chunk_gap
+            while True:
+                # 首帧用 TTFT 阈值的剩余预算（sdk_timeout 含 +5 缓冲，
+                # 那是给 SDK 连接建立的，首帧超时应严格按 TTFT 配置）
+                if first_chunk:
+                    ttft_budget = strategy_cfg.timeout.ttft - (time.monotonic() - start)
+                    iter_timeout = max(ttft_budget, 0.1)
+                else:
+                    iter_timeout = chunk_gap_timeout
+
+                try:
+                    chunk = await asyncio.wait_for(
+                        stream_iter.__anext__(),
+                        timeout=iter_timeout,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    elapsed = time.monotonic() - start
+                    if first_chunk:
+                        # 首帧超时，可以切换
+                        logger.warning(
+                            f"{log_prefix} 首帧等待超时 "
+                            f"elapsed={elapsed:.3f}s timeout={iter_timeout:.3f}s"
+                        )
+                        raise StrategyTriggered(StrategyEvent(
+                            strategy="ttft_timeout",
+                            action=StrategyAction.SWITCH,
+                            provider=ctx.provider_name,
+                            model=ctx.canonical_model,
+                            detail={
+                                "elapsed": elapsed,
+                                "trigger": "iter_timeout",
+                            },
+                        ))
+                    else:
+                        # 帧间超时：有内容只能 RECORD，无内容可 SWITCH
+                        action = StrategyAction.RECORD if content_buffer else StrategyAction.SWITCH
+                        logger.warning(
+                            f"{log_prefix} 帧间等待超时 "
+                            f"elapsed={elapsed:.3f}s gap_timeout={iter_timeout:.3f}s "
+                            f"has_content={bool(content_buffer)} action={action.value}"
+                        )
+                        raise StrategyTriggered(StrategyEvent(
+                            strategy="chunk_gap",
+                            action=action,
+                            provider=ctx.provider_name,
+                            model=ctx.canonical_model,
+                            detail={
+                                "gap_seconds": iter_timeout,
+                                "threshold": chunk_gap_timeout,
+                                "trigger": "iter_timeout",
+                            },
+                        ))
+
                 # chunk 刚从 SDK 到达，记录精确到达时间
                 chunk_arrived_at = time.monotonic()
-                model_wait_time += chunk_arrived_at - wait_start
+                chunk_gap = chunk_arrived_at - wait_start
+                model_wait_time += chunk_gap
 
                 elapsed = time.monotonic() - start
                 content = chunk.content or ""
-                if content:
+
+                logger.info(
+                    f"{log_prefix} "
+                    f"{'首帧到达' if first_chunk else '帧间隔'} "
+                    f"{chunk_gap:.3f}s "
+                    f"elapsed={elapsed:.3f}s content_len={len(content)} "
+                    f"thinking={chunk.thinking}"
+                )
+
+                # 非思考帧才累计 token
+                if content and not chunk.thinking:
                     token_estimate += max(len(content) // 4, 1)
 
                 if chunk.usage:
@@ -109,6 +184,7 @@ class StreamMonitor:
                         elapsed=elapsed,
                         total_tokens=token_estimate,
                         chunk_arrived_at=chunk_arrived_at,
+                        is_thinking=chunk.thinking,
                     )
                     if event:
                         self._metrics.inc(
@@ -120,10 +196,16 @@ class StreamMonitor:
                         )
                         raise StrategyTriggered(event)
 
-                if first_chunk and content:
+                if first_chunk and content and not chunk.thinking:
                     ttft = elapsed
 
                 first_chunk = False
+
+                # 思考帧不 yield 给调用方，不累计内容
+                if chunk.thinking:
+                    wait_start = time.monotonic()
+                    continue
+
                 content_buffer += content
                 yield chunk
                 # yield 返回后（调用方处理完毕），开始计时等待下一个 chunk

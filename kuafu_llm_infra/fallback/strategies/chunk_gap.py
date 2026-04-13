@@ -35,15 +35,19 @@ class ChunkGapStrategy(BaseStrategy):
         elapsed: float,
         total_tokens: int,
         chunk_arrived_at: Optional[float] = None,
+        is_thinking: bool = False,
     ) -> Optional[StrategyEvent]:
         now = chunk_arrived_at if chunk_arrived_at is not None else time.monotonic()
         gap = now - self._last_chunk_time
         self._last_chunk_time = now
 
-        if content:
-            self._has_content = True
+        # 思考阶段：保持时间更新但跳过 gap 检查
+        if is_thinking:
+            return None
 
         # Only fire if we already have content (mid-stream stall)
+        # 注意：先检查再更新 _has_content，避免首个内容帧把自己触发
+        # （首帧的 gap 是 TTFT，应由 ttft_timeout 策略负责）
         if self._has_content and gap > self._threshold:
             return StrategyEvent(
                 strategy=self.name,
@@ -52,6 +56,10 @@ class ChunkGapStrategy(BaseStrategy):
                 model=self._model,
                 detail={"gap_seconds": gap, "threshold": self._threshold},
             )
+
+        if content:
+            self._has_content = True
+
         return None
 
 
