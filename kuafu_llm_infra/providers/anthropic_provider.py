@@ -64,19 +64,73 @@ class AnthropicProvider(BaseProvider):
     def _convert_messages(
         messages: List[Dict[str, Any]],
     ) -> tuple[Optional[str], List[Dict[str, Any]]]:
-        """Extract system prompt and convert to Anthropic message format.
+        """Convert OpenAI-format messages to Anthropic message format.
 
-        Non-system messages are passed through as-is to preserve
-        complex content structures (e.g. tool_result blocks, tool_use
-        in assistant messages).
+        Handles:
+        - ``system`` messages → extracted as top-level system prompt
+        - ``assistant`` messages with ``tool_calls`` → Anthropic ``tool_use`` blocks
+        - ``tool`` messages → Anthropic ``tool_result`` blocks (merged into user turn)
+        - Other messages → passed through as-is
         """
         system_parts: List[str] = []
         converted: List[Dict[str, Any]] = []
-        for msg in messages:
-            if msg["role"] == "system":
+
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            role = msg.get("role", "")
+
+            if role == "system":
                 system_parts.append(msg.get("content", ""))
+                i += 1
+
+            elif role == "assistant":
+                tool_calls = msg.get("tool_calls")
+                if tool_calls:
+                    # Convert to Anthropic content blocks
+                    blocks: List[Dict[str, Any]] = []
+                    text = msg.get("content")
+                    if text:
+                        blocks.append({"type": "text", "text": text})
+                    for tc in tool_calls:
+                        func = tc.get("function", {})
+                        args_str = func.get("arguments", "{}")
+                        try:
+                            input_data = json.loads(args_str)
+                        except (json.JSONDecodeError, TypeError):
+                            input_data = {}
+                        blocks.append({
+                            "type": "tool_use",
+                            "id": tc.get("id", ""),
+                            "name": func.get("name", ""),
+                            "input": input_data,
+                        })
+                    converted.append({"role": "assistant", "content": blocks})
+                else:
+                    converted.append({k: v for k, v in msg.items()})
+                i += 1
+
+            elif role == "tool":
+                # Merge consecutive tool messages into a single user message
+                # with tool_result content blocks (Anthropic requirement)
+                tool_results: List[Dict[str, Any]] = []
+                while i < len(messages) and messages[i].get("role") == "tool":
+                    t = messages[i]
+                    result_block: Dict[str, Any] = {
+                        "type": "tool_result",
+                        "tool_use_id": t.get("tool_call_id", ""),
+                    }
+                    content = t.get("content")
+                    if content is not None:
+                        result_block["content"] = content
+                    tool_results.append(result_block)
+                    i += 1
+                converted.append({"role": "user", "content": tool_results})
+
             else:
                 converted.append({k: v for k, v in msg.items()})
+                i += 1
+
         system = "\n\n".join(system_parts) if system_parts else None
         return system, converted
 
@@ -110,11 +164,22 @@ class AnthropicProvider(BaseProvider):
 
         OpenAI → Anthropic mapping:
         - ``"auto"`` → ``{"type": "auto"}``
-        - ``"none"`` → ``{"type": "auto"}`` (caller should omit tools)
+        - ``"none"`` → ``{"type": "none"}``
+        - ``"required"`` → ``{"type": "any"}``
         """
-        if tool_choice == "none":
-            return {"type": "auto"}
-        return {"type": "auto"}
+        mapping = {
+            "auto": {"type": "auto"},
+            "none": {"type": "none"},
+            "required": {"type": "any"},
+        }
+        return mapping.get(tool_choice, {"type": "auto"})
+
+    # Anthropic → OpenAI finish_reason mapping
+    _FINISH_REASON_MAP = {
+        "end_turn": "stop",
+        "tool_use": "tool_calls",
+        "max_tokens": "length",
+    }
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,7 +248,7 @@ class AnthropicProvider(BaseProvider):
         return ChatResponse(
             content=content,
             model=resp.model,
-            finish_reason=resp.stop_reason or "stop",
+            finish_reason=self._FINISH_REASON_MAP.get(resp.stop_reason, resp.stop_reason or "stop"),
             usage=usage,
             tool_calls=tool_calls if tool_calls else None,
             raw=resp,
@@ -228,6 +293,7 @@ class AnthropicProvider(BaseProvider):
         output_tokens = 0
         cached_tokens = 0
         current_tool_call: Optional[ToolCall] = None
+        tool_call_index = 0  # Tracks index for OpenAI-compatible streaming
 
         async for event in stream:
             if event.type == "message_start":
@@ -246,7 +312,23 @@ class AnthropicProvider(BaseProvider):
                             name=block.name,
                             arguments="",
                         ),
+                        index=tool_call_index,
                     )
+                    # Yield the initial tool call delta with id and name
+                    yield StreamChunk(
+                        content="",
+                        tool_calls=[ToolCall(
+                            id=block.id,
+                            type="function",
+                            function=ToolCallFunction(
+                                name=block.name,
+                                arguments="",
+                            ),
+                            index=tool_call_index,
+                        )],
+                        raw=event,
+                    )
+                    tool_call_index += 1
                 continue
 
             if event.type == "content_block_delta":
@@ -260,12 +342,13 @@ class AnthropicProvider(BaseProvider):
                     yield StreamChunk(
                         content="",
                         tool_calls=[ToolCall(
-                            id=current_tool_call.id,
+                            id="",
                             type="function",
                             function=ToolCallFunction(
-                                name=current_tool_call.function.name,
+                                name="",
                                 arguments=event.delta.partial_json,
                             ),
+                            index=current_tool_call.index,
                         )],
                         raw=event,
                     )
@@ -284,7 +367,10 @@ class AnthropicProvider(BaseProvider):
                 )
                 yield StreamChunk(
                     content="",
-                    finish_reason=event.delta.stop_reason,
+                    finish_reason=self._FINISH_REASON_MAP.get(
+                        event.delta.stop_reason,
+                        event.delta.stop_reason or "stop",
+                    ),
                     usage=usage,
                     raw=event,
                 )

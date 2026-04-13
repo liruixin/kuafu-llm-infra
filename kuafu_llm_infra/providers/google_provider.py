@@ -197,6 +197,25 @@ class GoogleProvider(BaseProvider):
         return [types.Tool(function_declarations=declarations)]
 
     @staticmethod
+    def _convert_tool_choice(tool_choice: str) -> types.ToolConfig:
+        """Convert OpenAI-format tool_choice to Gemini ToolConfig.
+
+        OpenAI -> Gemini mapping:
+        - ``"auto"`` -> ``AUTO``
+        - ``"none"`` -> ``NONE``
+        - ``"required"`` -> ``ANY``
+        """
+        mode_map = {
+            "auto": "AUTO",
+            "none": "NONE",
+            "required": "ANY",
+        }
+        mode = mode_map.get(tool_choice, "AUTO")
+        return types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(mode=mode),
+        )
+
+    @staticmethod
     def _extract_usage(usage_meta) -> TokenUsage:
         """从 usage_metadata 提取 TokenUsage。"""
         if not usage_meta:
@@ -246,6 +265,8 @@ class GoogleProvider(BaseProvider):
             config_params["temperature"] = temperature
         if tools is not None:
             config_params["tools"] = self._convert_tools(tools)
+        if tool_choice is not None:
+            config_params["tool_config"] = self._convert_tool_choice(tool_choice)
         config = types.GenerateContentConfig(**config_params)
 
         coro = self._client.aio.models.generate_content(
@@ -257,7 +278,7 @@ class GoogleProvider(BaseProvider):
             resp = await coro
 
         if not resp.candidates:
-            raise ValueError("Gemini 返回空候选列表")
+            raise ValueError("Gemini returned empty candidate list")
 
         candidate = resp.candidates[0]
         content = ""
@@ -317,6 +338,8 @@ class GoogleProvider(BaseProvider):
             config_params["temperature"] = temperature
         if tools is not None:
             config_params["tools"] = self._convert_tools(tools)
+        if tool_choice is not None:
+            config_params["tool_config"] = self._convert_tool_choice(tool_choice)
         config = types.GenerateContentConfig(**config_params)
 
         coro = self._client.aio.models.generate_content_stream(
