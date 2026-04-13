@@ -232,8 +232,9 @@ class LLMClient:
         # State backend（Redis 模式下由外部传入，本地模式使用内存）
         self._state = state or MemoryBackend()
 
-        # Metrics
+        # Metrics（Redis 模式首次加载时用空配置创建 Noop，后续 _apply_config 首次触发时重建）
         self._metrics = self._create_metrics(config)
+        self._metrics_initialized = config_loaded  # 本地模式=True（已用真实配置），Redis模式=False
 
         # Alert dispatcher
         self._alert_dispatcher = self._create_alert_dispatcher(config)
@@ -390,6 +391,20 @@ class LLMClient:
             if key not in expected_keys:
                 del self._adapters[key]
                 logger.info(f"Provider adapter removed: {key}")
+
+        # Metrics 只在首次加载时创建（Prometheus HTTP server 启动后不可变）
+        if not self._metrics_initialized:
+            self._metrics = self._create_metrics(new_config)
+            self._scorer._metrics = self._metrics
+            self._engine._metrics = self._metrics
+            self._engine._recorder._metrics = self._metrics
+            self._engine._stream_monitor._metrics = self._metrics
+            self._health_checker._metrics = self._metrics
+            self._metrics_initialized = True
+            logger.info(f"Metrics initialized: backend={new_config.metrics.backend}, port={new_config.metrics.port}")
+
+        # 更新 scorer 的 health_config（cooldown、failure_threshold 等）
+        self._scorer._health_config = new_config.health_check
 
         # Update sub-components via public APIs (no private attribute access)
         self._engine.update_config(new_config, self._adapters)
