@@ -158,6 +158,8 @@ class RedisBackend(StateBackend):
             "probe_ttft_ms": card.probe_ttft_ms,
             "probe_valid": card.probe_valid,
             "probe_time": card.probe_time,
+            "probe_consecutive_failures": card.probe_consecutive_failures,
+            "probe_consecutive_successes": card.probe_consecutive_successes,
         })
 
     @staticmethod
@@ -170,6 +172,8 @@ class RedisBackend(StateBackend):
             probe_ttft_ms=data.get("probe_ttft_ms", 0.0),
             probe_valid=data.get("probe_valid", True),
             probe_time=data.get("probe_time", 0.0),
+            probe_consecutive_failures=data.get("probe_consecutive_failures", 0),
+            probe_consecutive_successes=data.get("probe_consecutive_successes", 0),
         )
         for entry_data in data.get("window", []):
             card.window.append(SlidingWindowEntry(
