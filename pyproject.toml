@@ -29,13 +29,12 @@ dependencies = [
     "httpx>=0.25",
     "pyyaml>=6.0",
     "pydantic>=2.0",
+    "google-genai>=1.0",
+    "prometheus-client>=0.20",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
-google = ["google-genai>=1.0"]
-prometheus = ["prometheus-client>=0.20"]
-redis = ["redis>=5.0"]
-all = ["kuafu-llm-infra[google,prometheus,redis]"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
