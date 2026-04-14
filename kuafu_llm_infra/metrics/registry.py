@@ -106,7 +106,7 @@ PROVIDER_HEALTH = MetricDef(
     MetricKind.GAUGE,
     "Provider health status (1=healthy, 0=unhealthy)",
     scope=LabelScope.SYSTEM,
-    extra_labels=("provider",),
+    extra_labels=("model", "provider"),
 )
 
 PROVIDER_SCORE = MetricDef(
@@ -130,7 +130,7 @@ PROBE_TTFT = MetricDef(
     MetricKind.HISTOGRAM,
     "Probe time to first token in seconds",
     scope=LabelScope.SYSTEM,
-    extra_labels=("provider",),
+    extra_labels=("model", "provider"),
 )
 
 PROBE_TOTAL = MetricDef(
@@ -138,7 +138,7 @@ PROBE_TOTAL = MetricDef(
     MetricKind.COUNTER,
     "Total probe requests",
     scope=LabelScope.SYSTEM,
-    extra_labels=("provider", "status"),
+    extra_labels=("model", "provider", "status"),
 )
 
 # ============================================================================

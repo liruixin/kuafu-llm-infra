@@ -6,16 +6,142 @@
   "links": [],
   "panels": [
     {
-      "title": "请求概览",
+      "title": "概览",
       "type": "row",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "collapsed": false
     },
     {
-      "title": "请求 QPS",
-      "description": "每秒请求数，按状态（success/error）分组",
+      "title": "总请求量",
+      "description": "时间范围内的请求总量",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "legendFormat": "总量",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "成功率",
+      "description": "请求成功率",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit", "min": 0, "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(llm_request_total{status=\"success\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) / sum(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "当前 QPS",
+      "description": "当前每秒请求数",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m]))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "TTFT P50",
+      "description": "首 Token 响应时间中位数",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Token 累计用量",
+      "description": "输入 / 输出 / 缓存 token 累计值",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": { "graphMode": "none", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum(llm_input_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "legendFormat": "输入 tokens",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(llm_output_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "legendFormat": "输出 tokens",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(llm_cached_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "legendFormat": "缓存 tokens",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "title": "请求与错误",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "title": "请求 QPS（按状态）",
+      "description": "每秒请求数，按 success / error 分组",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -39,7 +165,7 @@
       "title": "请求 QPS（按模型）",
       "description": "每个模型的请求速率",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
@@ -53,10 +179,10 @@
       ]
     },
     {
-      "title": "错误率",
-      "description": "请求错误率百分比，按模型+提供商",
+      "title": "错误率（按模型+提供商）",
+      "description": "各模型+提供商组合的请求错误率",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -84,14 +210,14 @@
     {
       "title": "延迟与速度",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
       "collapsed": false
     },
     {
       "title": "请求耗时 P50 / P95 / P99",
-      "description": "请求总耗时分位数",
+      "description": "请求总耗时分位数（全局）",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
@@ -116,9 +242,9 @@
     },
     {
       "title": "TTFT 首 Token 耗时（按模型+提供商）",
-      "description": "首 Token 响应时间 P50 / P95",
+      "description": "首 Token 响应时间 P50 / P95，衡量模型响应速度",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
@@ -126,21 +252,21 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
-          "legendFormat": "P50 {{model}}/{{provider}}",
+          "legendFormat": "P50 {{model}} / {{provider}}",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.95, sum(rate(llm_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
-          "legendFormat": "P95 {{model}}/{{provider}}",
+          "legendFormat": "P95 {{model}} / {{provider}}",
           "refId": "B"
         }
       ]
     },
     {
       "title": "生成速度 Tokens/sec（按模型+提供商）",
-      "description": "单次请求的平均输出 token 生成速率（纯生成阶段，排除 TTFT 和程序处理时间）",
+      "description": "单次请求的平均输出 token 生成速率（纯生成阶段，排除 TTFT）",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "axisSoftMin": 0 } }
@@ -148,27 +274,61 @@
       "targets": [
         {
           "expr": "rate(llm_tokens_per_second_sum{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m]) / rate(llm_tokens_per_second_count{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])",
-          "legendFormat": "avg {{model}}/{{provider}}",
+          "legendFormat": "avg {{model}} / {{provider}}",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.50, sum(rate(llm_tokens_per_second_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
-          "legendFormat": "P50 {{model}}/{{provider}}",
+          "legendFormat": "P50 {{model}} / {{provider}}",
           "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "请求耗时 P50（按模型+提供商）",
+      "description": "各模型+提供商组合的请求耗时中位数",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "legendFormat": "{{model}} / {{provider}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "请求耗时 P95（按模型+提供商）",
+      "description": "各模型+提供商组合的请求耗时 P95",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "legendFormat": "{{model}} / {{provider}}",
+          "refId": "A"
         }
       ]
     },
     {
       "title": "Token 用量",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
       "collapsed": false
     },
     {
-      "title": "输入 Token 速率",
-      "description": "系统每秒消耗的输入 token 数（按模型）",
+      "title": "输入 Token 吞吐量 (tokens/s)",
+      "description": "系统级：所有请求每秒消耗的输入 token 总数（按模型汇总）",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
@@ -182,10 +342,10 @@
       ]
     },
     {
-      "title": "输出 Token 速率",
-      "description": "系统每秒产出的输出 token 数（按模型）",
+      "title": "输出 Token 吞吐量 (tokens/s)",
+      "description": "系统级：所有请求每秒产出的输出 token 总数（按模型汇总）",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
@@ -199,27 +359,10 @@
       ]
     },
     {
-      "title": "缓存命中 Token 总数",
-      "description": "命中 prompt cache 的 token 累计总量（按模型+提供商）",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 19 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } }
-      },
-      "targets": [
-        {
-          "expr": "sum(increase(llm_cached_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[$__range])) by (model, provider)",
-          "legendFormat": "{{model}} / {{provider}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
       "title": "缓存命中率",
       "description": "cached_tokens / input_tokens，衡量 prompt cache 效果",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 27 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -236,44 +379,16 @@
       ]
     },
     {
-      "title": "Token 累计用量",
-      "description": "输入 / 输出 / 缓存 token 的累计值",
-      "type": "stat",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": { "unit": "short" }
-      },
-      "options": { "graphMode": "none", "textMode": "auto", "colorMode": "value" },
-      "targets": [
-        {
-          "expr": "sum(llm_input_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
-          "legendFormat": "输入 tokens",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(llm_output_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
-          "legendFormat": "输出 tokens",
-          "refId": "B"
-        },
-        {
-          "expr": "sum(llm_cached_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
-          "legendFormat": "缓存 tokens",
-          "refId": "C"
-        }
-      ]
-    },
-    {
       "title": "降级与策略",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
       "collapsed": false
     },
     {
       "title": "策略触发速率",
-      "description": "降级策略触发频率（ttft_timeout / chunk_gap / empty_response 等）",
+      "description": "降级策略触发频率（ttft_timeout / chunk_gap / empty_response / slow_speed 等）",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "ops", "custom": { "drawStyle": "bars", "fillOpacity": 50 } }
@@ -281,7 +396,7 @@
       "targets": [
         {
           "expr": "sum(rate(llm_strategy_triggered_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (strategy, model, provider)",
-          "legendFormat": "{{strategy}} ({{model}}/{{provider}})",
+          "legendFormat": "{{strategy}} ({{model}} / {{provider}})",
           "refId": "A"
         }
       ]
@@ -290,7 +405,7 @@
       "title": "策略触发累计",
       "description": "各策略累计触发次数",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 36 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 41 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
@@ -304,7 +419,7 @@
       "title": "请求成功/失败累计",
       "description": "请求总量按状态分布",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 36 },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 41 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
@@ -317,14 +432,14 @@
     {
       "title": "提供商健康与评分",
       "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 44 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 49 },
       "collapsed": false
     },
     {
-      "title": "提供商健康状态",
-      "description": "1=健康 0=不健康，来自后台探测",
+      "title": "健康状态（模型+提供商）",
+      "description": "后台探测的健康状态，每个模型+提供商组合独立探测。UP=健康 DOWN=不健康",
       "type": "state-timeline",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 50 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -343,8 +458,8 @@
       },
       "targets": [
         {
-          "expr": "llm_provider_health{provider=~\"$provider\"}",
-          "legendFormat": "{{provider}}",
+          "expr": "llm_provider_health{model=~\"$model\", provider=~\"$provider\"}",
+          "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
       ]
@@ -353,7 +468,7 @@
       "title": "提供商综合评分",
       "description": "Scorer 计算的综合评分（0~1），越高越优先被选择",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 58 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -373,7 +488,7 @@
       "title": "评分分解（子分值）",
       "description": "综合评分的 4 个子分值：priority(权重0.25)、speed(0.30)、success(0.35)、stability(0.10)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 53 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
@@ -384,38 +499,44 @@
       "targets": [
         {
           "expr": "llm_score_component{model=~\"$model\", provider=~\"$provider\"}",
-          "legendFormat": "{{model}} / {{provider}} — {{component}}",
+          "legendFormat": "{{model}} / {{provider}} - {{component}}",
           "refId": "A"
         }
       ]
     },
     {
-      "title": "探测 TTFT（按提供商）",
-      "description": "后台探测的首 Token 响应时间",
+      "title": "探测详情",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 66 },
+      "collapsed": false
+    },
+    {
+      "title": "探测 TTFT（按模型+提供商）",
+      "description": "后台探测的首 Token 响应时间 P50 / P95",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 53 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 67 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_probe_ttft_seconds_bucket{provider=~\"$provider\"}[5m])) by (le, provider))",
-          "legendFormat": "P50 {{provider}}",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_probe_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "legendFormat": "P50 {{model}} / {{provider}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_probe_ttft_seconds_bucket{provider=~\"$provider\"}[5m])) by (le, provider))",
-          "legendFormat": "P95 {{provider}}",
+          "expr": "histogram_quantile(0.95, sum(rate(llm_probe_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "legendFormat": "P95 {{model}} / {{provider}}",
           "refId": "B"
         }
       ]
     },
     {
-      "title": "探测成功/失败速率",
-      "description": "后台探测请求速率，按状态分组",
+      "title": "探测成功/失败速率（按模型+提供商）",
+      "description": "后台探测请求速率，每个模型+提供商组合独立统计",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 53 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 67 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
@@ -426,48 +547,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_probe_total{provider=~\"$provider\"}[5m])) by (provider, status)",
-          "legendFormat": "{{provider}} {{status}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "title": "请求耗时（按模型+提供商）",
-      "type": "row",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 61 },
-      "collapsed": false
-    },
-    {
-      "title": "请求耗时 P50（按模型+提供商）",
-      "description": "各模型+提供商组合的请求耗时中位数",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 62 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
-          "legendFormat": "{{model}} / {{provider}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "title": "请求耗时 P95（按模型+提供商）",
-      "description": "各模型+提供商组合的请求耗时 P95",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 62 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5 } }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
-          "legendFormat": "{{model}} / {{provider}}",
+          "expr": "sum(rate(llm_probe_total{model=~\"$model\", provider=~\"$provider\"}[5m])) by (model, provider, status)",
+          "legendFormat": "{{model}} / {{provider}} {{status}}",
           "refId": "A"
         }
       ]
@@ -533,5 +614,5 @@
   "timezone": "browser",
   "title": "LLM Infrastructure Monitor",
   "uid": "kuafu-llm-infra",
-  "version": 2
+  "version": 3
 }

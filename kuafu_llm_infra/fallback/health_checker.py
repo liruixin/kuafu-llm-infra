@@ -196,10 +196,10 @@ class HealthChecker:
 
             self._metrics.set(
                 m.PROVIDER_HEALTH, 1.0 if card.health else 0.0,
-                provider=provider_name,
+                model=canonical_model, provider=provider_name,
             )
-            self._metrics.observe(m.PROBE_TTFT, ttft_ms / 1000.0, provider=provider_name)
-            self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="success")
+            self._metrics.observe(m.PROBE_TTFT, ttft_ms / 1000.0, model=canonical_model, provider=provider_name)
+            self._metrics.inc(m.PROBE_TOTAL, model=canonical_model, provider=provider_name, status="success")
 
             logger.debug(
                 f"Probe done: ({canonical_model}, {provider_name}) "
@@ -231,9 +231,9 @@ class HealthChecker:
 
             self._metrics.set(
                 m.PROVIDER_HEALTH, 1.0 if card.health else 0.0,
-                provider=provider_name,
+                model=canonical_model, provider=provider_name,
             )
-            self._metrics.inc(m.PROBE_TOTAL, provider=provider_name, status="error")
+            self._metrics.inc(m.PROBE_TOTAL, model=canonical_model, provider=provider_name, status="error")
 
             # 探测失败日志：输出异常类型 + 详情
             error_detail = str(e) or repr(e) or "(no detail)"
