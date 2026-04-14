@@ -161,13 +161,13 @@ class StreamMonitor:
                 elapsed = time.monotonic() - start
                 content = chunk.content or ""
 
-                logger.info(
-                    f"{log_prefix} "
-                    f"{'首帧到达' if first_chunk else '帧间隔'} "
-                    f"{chunk_gap:.3f}s "
-                    f"elapsed={elapsed:.3f}s content_len={len(content)} "
-                    f"thinking={chunk.thinking}"
-                )
+                # logger.info(
+                #     f"{log_prefix} "
+                #     f"{'首帧到达' if first_chunk else '帧间隔'} "
+                #     f"{chunk_gap:.3f}s "
+                #     f"elapsed={elapsed:.3f}s content_len={len(content)} "
+                #     f"thinking={chunk.thinking}"
+                # )
 
                 # 非思考帧才累计 token
                 if content and not chunk.thinking:
