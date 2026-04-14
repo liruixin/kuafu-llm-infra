@@ -271,8 +271,27 @@ class FallbackEngine:
 
                     duration = time.monotonic() - start
 
-                    # 6. 空响应视为失败，触发切换（不重试）
+                    # 6. 空响应：先重试，重试耗尽再切换提供商
                     if not response.content.strip() and not response.tool_calls:
+                        if provider_retries < strategy_cfg.max_retries:
+                            provider_retries += 1
+                            remaining = strategy_cfg.timeout.total - (time.monotonic() - chain_start)
+                            if remaining <= 0:
+                                raise StrategyTriggered(StrategyEvent(
+                                    strategy="empty_response",
+                                    action=StrategyAction.SWITCH,
+                                    provider=ctx.provider_name,
+                                    model=ctx.canonical_model,
+                                    detail={"elapsed": duration},
+                                ))
+                            timeout = min(strategy_cfg.timeout.per_request, remaining)
+                            logger.info(
+                                f"[{business_key}]{tag} "
+                                f"#{attempt[0]} {ctx.provider_name} → "
+                                f"空响应, 重试 "
+                                f"({provider_retries}/{strategy_cfg.max_retries})"
+                            )
+                            continue
                         raise StrategyTriggered(StrategyEvent(
                             strategy="empty_response",
                             action=StrategyAction.SWITCH,
