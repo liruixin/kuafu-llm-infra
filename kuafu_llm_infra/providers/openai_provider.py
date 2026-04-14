@@ -188,8 +188,14 @@ class OpenAIProvider(BaseProvider):
             delta = chunk.choices[0].delta
             text = delta.content or ""
 
-            # 处理 <think> 标签：跳过思考内容
-            is_thinking_frame = False
+            # 处理 reasoning_content 字段（DeepSeek 等模型通过独立字段返回思考内容）
+            reasoning = getattr(delta, "reasoning_content", None) or ""
+            if not text and reasoning:
+                is_thinking_frame = True
+            else:
+                is_thinking_frame = False
+
+            # 处理 <think> 标签：跳过思考内容（MiniMax、开源模型等在 content 里嵌标签）
             if text:
                 if in_think:
                     # 正在思考块内，检查是否遇到 </think>

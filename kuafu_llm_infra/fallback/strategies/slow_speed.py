@@ -71,4 +71,5 @@ class SlowSpeedStrategy(BaseStrategy):
 
 @register_strategy
 def create_slow_speed(cfg, provider: str, model: str):
-    return SlowSpeedStrategy(cfg.slow_speed_threshold, provider, model)
+    # TODO: 慢速检测暂时禁用，已经开始吐字后因为慢就停掉不合理，后续重新设计
+    return None
