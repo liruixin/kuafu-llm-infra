@@ -59,9 +59,11 @@ class OpenAIProvider(BaseProvider):
         async for chunk in stream:
             if not chunk.choices:
                 continue
-            text = chunk.choices[0].delta.content or ""
-            if text:
-                yield StreamChunk(content=text, raw=chunk)
+            delta = chunk.choices[0].delta
+            text = delta.content or ""
+            reasoning = getattr(delta, "reasoning_content", None) or ""
+            if text or reasoning:
+                yield StreamChunk(content=text or reasoning, raw=chunk)
 
     async def chat(
         self,
