@@ -261,7 +261,7 @@ class HealthChecker:
                 )
                 if was_healthy and self._alert_dispatcher:
                     self._alert_dispatcher.dispatch(AlertEvent(
-                        level="critical",
+                        level="warning",
                         title="提供商标记不可用",
                         message=(
                             f"({canonical_model}, {provider_name}) 连续探测失败 "

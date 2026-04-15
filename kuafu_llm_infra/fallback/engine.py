@@ -414,7 +414,7 @@ class FallbackEngine:
         if failure_details:
             detail_block = "\n\n失败明细:\n" + "\n".join(f"  {d}" for d in failure_details)
         self._recorder.send_alert(
-            "critical", "所有提供商耗尽",
+            "critical", "所有提供商耗尽【业务有损，请立即查看】",
             f"模型链 {' → '.join(chain)} 全部失败，"
             f"共尝试 {attempt[0]} 次，总耗时 {total_duration:.2f}s。"
             f"最后错误: {last_error}{detail_block}",
@@ -617,7 +617,7 @@ class FallbackEngine:
         if failure_details:
             detail_block = "\n\n失败明细:\n" + "\n".join(f"  {d}" for d in failure_details)
         self._recorder.send_alert(
-            "critical", "所有提供商耗尽",
+            "critical", "所有提供商耗尽【业务有损，请立即查看】",
             f"模型链 {' → '.join(chain)} 全部失败，"
             f"共尝试 {attempt[0]} 次，总耗时 {total_duration:.2f}s。"
             f"最后错误: {last_error}{detail_block}",
