@@ -21,6 +21,7 @@ from ..state.backend import StateBackend
 from ..metrics.collector import MetricsCollector, NoopCollector
 from ..metrics import registry as m
 from ..alert.dispatcher import AlertDispatcher
+from ..recording.dispatcher import RecordDispatcher
 from .scorer import Scorer
 from .recorder import RequestRecorder
 from .stream_monitor import StreamMonitor, StrategyTriggered
@@ -56,13 +57,16 @@ class FallbackEngine:
         state: StateBackend,
         metrics: Optional[MetricsCollector] = None,
         alert_dispatcher: Optional[AlertDispatcher] = None,
+        record_dispatcher: Optional[RecordDispatcher] = None,
     ) -> None:
         self._config = config
         self._adapters = adapters
         self._scorer = scorer
         self._state = state
         self._metrics = metrics or NoopCollector()
-        self._recorder = RequestRecorder(scorer, self._metrics, alert_dispatcher)
+        self._recorder = RequestRecorder(
+            scorer, self._metrics, alert_dispatcher, record_dispatcher,
+        )
         self._stream_monitor = StreamMonitor(self._metrics, self._recorder)
 
     def update_config(

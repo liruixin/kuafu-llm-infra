@@ -51,6 +51,7 @@ from .alert.channels.feishu import FeishuAlertChannel
 from .alert.channels.webhook import WebhookAlertChannel
 from .alert.rules import AlertRules
 from .alert.dispatcher import AlertDispatcher
+from .recording.dispatcher import RecordDispatcher
 from .fallback.engine import FallbackEngine
 from .fallback.scorer import Scorer
 from .fallback.health_checker import HealthChecker
@@ -239,6 +240,9 @@ class LLMClient:
         # Alert dispatcher
         self._alert_dispatcher = self._create_alert_dispatcher(config)
 
+        # Record dispatcher（高维度数据收集，启动时初始化一次，不热更新）
+        self._record_dispatcher = self._create_record_dispatcher(config)
+
         # Provider adapters
         self._adapters: Dict[str, BaseProvider] = {}
         self._build_adapters(config)
@@ -254,6 +258,7 @@ class LLMClient:
             state=self._state,
             metrics=self._metrics,
             alert_dispatcher=self._alert_dispatcher,
+            record_dispatcher=self._record_dispatcher,
         )
 
         # Health checker
@@ -272,12 +277,14 @@ class LLMClient:
         self._pull_task: Optional[asyncio.Task] = None
 
     def start(self) -> None:
-        """Start background tasks (health checker, config pull, alert dispatcher)."""
+        """Start background tasks (health checker, config pull, alert dispatcher, record dispatcher)."""
         if self._started:
             return
         self._health_checker.start()
         if self._alert_dispatcher:
             self._alert_dispatcher.start()
+        if self._record_dispatcher:
+            self._record_dispatcher.start()
         self._pull_task = asyncio.create_task(self._config_pull_loop())
         self._started = True
         logger.info("LLMClient started")
@@ -289,6 +296,8 @@ class LLMClient:
             self._pull_task.cancel()
         if self._alert_dispatcher:
             await self._alert_dispatcher.stop()
+        if self._record_dispatcher:
+            await self._record_dispatcher.stop()
         self._started = False
         logger.info("LLMClient shutdown")
 
@@ -503,6 +512,36 @@ class LLMClient:
 
         rules = AlertRules(silence_seconds=config.alert.rules.silence_seconds)
         return AlertDispatcher(channels=channels, rules=rules)
+
+    @staticmethod
+    def _create_record_dispatcher(config: LLMStabilityConfig) -> Optional[RecordDispatcher]:
+        if not config.recording.enabled:
+            return None
+        ch_cfg = config.recording.clickhouse
+        if not ch_cfg.host:
+            logger.warning("Recording enabled but clickhouse.host not set, skipping")
+            return None
+        try:
+            from .recording.clickhouse import ClickHouseRecordSink
+            sink = ClickHouseRecordSink(
+                host=ch_cfg.host,
+                database=ch_cfg.database,
+                table=ch_cfg.table,
+                label_columns=ch_cfg.label_columns,
+                port=ch_cfg.port,
+                username=ch_cfg.username,
+                password=ch_cfg.password,
+                secure=ch_cfg.secure,
+            )
+        except ImportError:
+            logger.warning("clickhouse-connect not installed, skipping recording")
+            return None
+        return RecordDispatcher(
+            sinks=[sink],
+            batch_size=config.recording.batch_size,
+            flush_interval=config.recording.flush_interval,
+            queue_size=config.recording.queue_size,
+        )
 
 
 # ============================================================================

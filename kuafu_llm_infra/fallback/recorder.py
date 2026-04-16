@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from ..types import RequestContext, TokenUsage
+from ..types import RequestContext, RequestRecord, TokenUsage
 from ..metrics.collector import MetricsCollector, NoopCollector
 from ..metrics import registry as m
 from ..alert.dispatcher import AlertDispatcher
 from ..alert.channels.base import AlertEvent
+from ..recording.dispatcher import RecordDispatcher
 from .scorer import Scorer
 
 logger = logging.getLogger("kuafu_llm_infra.recorder")
@@ -28,10 +29,12 @@ class RequestRecorder:
         scorer: Scorer,
         metrics: MetricsCollector,
         alert_dispatcher: Optional[AlertDispatcher] = None,
+        record_dispatcher: Optional[RecordDispatcher] = None,
     ) -> None:
         self._scorer = scorer
         self._metrics = metrics
         self._alert = alert_dispatcher
+        self._recording = record_dispatcher
 
     # ------------------------------------------------------------------
     # Success recording
@@ -60,25 +63,21 @@ class RequestRecorder:
         self._metrics.inc(
             m.REQUEST_TOTAL,
             model=model, provider=provider, status="success",
-            **ctx.labels,
         )
         self._metrics.observe(
             m.REQUEST_DURATION, duration,
             model=model, provider=provider,
-            **ctx.labels,
         )
 
         if ttft is not None:
             self._metrics.observe(
                 m.TTFT, ttft,
                 model=model, provider=provider,
-                **ctx.labels,
             )
         if tps is not None and tps > 0:
             self._metrics.observe(
                 m.TOKENS_PER_SECOND, tps,
                 model=model, provider=provider,
-                **ctx.labels,
             )
 
         # Token usage
@@ -87,20 +86,33 @@ class RequestRecorder:
                 self._metrics.inc(
                     m.INPUT_TOKENS, usage.prompt_tokens,
                     model=model, provider=provider,
-                    **ctx.labels,
                 )
             if usage.completion_tokens > 0:
                 self._metrics.inc(
                     m.OUTPUT_TOKENS, usage.completion_tokens,
                     model=model, provider=provider,
-                    **ctx.labels,
                 )
             if usage.cached_tokens > 0:
                 self._metrics.inc(
                     m.CACHED_TOKENS, usage.cached_tokens,
                     model=model, provider=provider,
-                    **ctx.labels,
                 )
+
+        # 高维度数据收集（含 labels）
+        if self._recording:
+            self._recording.collect(RequestRecord(
+                business_key=ctx.business_key,
+                canonical_model=model,
+                provider_name=provider,
+                labels=ctx.labels,
+                status="success",
+                duration_ms=int(duration * 1000),
+                ttft_ms=int(ttft * 1000) if ttft else 0,
+                tps=tps or 0.0,
+                input_tokens=usage.prompt_tokens if usage else 0,
+                output_tokens=usage.completion_tokens if usage else 0,
+                cached_tokens=usage.cached_tokens if usage else 0,
+            ))
 
     # ------------------------------------------------------------------
     # Failure recording
@@ -121,13 +133,24 @@ class RequestRecorder:
         self._metrics.inc(
             m.REQUEST_TOTAL,
             model=model, provider=provider, status="error",
-            **ctx.labels,
         )
         self._metrics.inc(
             m.STRATEGY_TRIGGERED,
             model=model, provider=provider, strategy=reason,
-            **ctx.labels,
         )
+
+        # 高维度数据收集（含 labels）
+        if self._recording:
+            self._recording.collect(RequestRecord(
+                business_key=ctx.business_key,
+                canonical_model=model,
+                provider_name=provider,
+                labels=ctx.labels,
+                status="error",
+                duration_ms=0,
+                error_reason=reason,
+                error_detail=detail,
+            ))
 
     # ------------------------------------------------------------------
     # Alert dispatch

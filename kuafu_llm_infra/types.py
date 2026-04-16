@@ -7,6 +7,7 @@ providers, engine, metrics, and gateway layers.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -41,3 +42,22 @@ class RequestContext:
     canonical_model: str = ""
     provider_name: str = ""
     actual_model_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RequestRecord:
+    """一次请求的完整记录，含高维度 labels，用于 ClickHouse 等独立存储。"""
+    business_key: str
+    canonical_model: str
+    provider_name: str
+    labels: Dict[str, str]
+    status: str                          # "success" | "error"
+    duration_ms: int                     # 总耗时（毫秒）
+    ttft_ms: int = 0                     # 首 token 延迟（毫秒）
+    tps: float = 0.0                     # tokens/sec
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    error_reason: str = ""
+    error_detail: str = ""
+    timestamp: float = field(default_factory=time.time)

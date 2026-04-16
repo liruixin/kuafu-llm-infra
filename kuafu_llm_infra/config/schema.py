@@ -142,6 +142,31 @@ class AlertConfig(BaseModel):
 
 
 # ============================================================================
+# Recording config (ClickHouse high-dimensional data collection)
+# ============================================================================
+
+class ClickHouseConfig(BaseModel):
+    """ClickHouse connection configuration."""
+    host: str = ""
+    database: str = "default"
+    table: str = "llm_request_metrics"
+    label_columns: List[str] = Field(default_factory=list)  # labels 中要写入 ClickHouse 的 key，需与表列名一致
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    secure: bool = False
+
+
+class RecordingConfig(BaseModel):
+    """Request-level data collection configuration."""
+    enabled: bool = False
+    clickhouse: ClickHouseConfig = Field(default_factory=ClickHouseConfig)
+    batch_size: int = 500
+    flush_interval: float = 2.0
+    queue_size: int = 50_000
+
+
+# ============================================================================
 # Top-level config
 # ============================================================================
 
@@ -158,6 +183,7 @@ class LLMStabilityConfig(BaseModel):
     health_check: HealthCheckConfig = Field(default_factory=HealthCheckConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)
+    recording: RecordingConfig = Field(default_factory=RecordingConfig)
 
     def model_post_init(self, __context: Any) -> None:
         # Inject provider name into each ProviderConfig

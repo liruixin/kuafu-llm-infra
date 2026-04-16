@@ -192,7 +192,6 @@ class StreamMonitor:
                             model=ctx.canonical_model,
                             provider=ctx.provider_name,
                             strategy=event.strategy,
-                            **ctx.labels,
                         )
                         raise StrategyTriggered(event)
 
@@ -235,7 +234,6 @@ class StreamMonitor:
                     model=ctx.canonical_model,
                     provider=ctx.provider_name,
                     strategy=event.strategy,
-                    **ctx.labels,
                 )
                 raise StrategyTriggered(event)
 

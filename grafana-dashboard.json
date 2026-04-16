@@ -23,7 +23,7 @@
       "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "sum(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "expr": "sum(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
           "legendFormat": "总量",
           "refId": "A"
         }
@@ -51,7 +51,7 @@
       "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "sum(llm_request_total{status=\"success\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) / sum(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "expr": "sum(llm_request_total{status=\"success\", instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) / sum(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -69,7 +69,7 @@
       "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "sum(rate(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m]))",
+          "expr": "sum(rate(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -97,7 +97,7 @@
       "options": { "graphMode": "area", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -115,17 +115,17 @@
       "options": { "graphMode": "none", "textMode": "auto", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         {
-          "expr": "sum(llm_input_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "expr": "sum(llm_input_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
           "legendFormat": "输入 tokens",
           "refId": "A"
         },
         {
-          "expr": "sum(llm_output_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "expr": "sum(llm_output_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
           "legendFormat": "输出 tokens",
           "refId": "B"
         },
         {
-          "expr": "sum(llm_cached_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
+          "expr": "sum(llm_cached_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"})",
           "legendFormat": "缓存 tokens",
           "refId": "C"
         }
@@ -155,7 +155,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (status)",
+          "expr": "sum(rate(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (status)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -172,7 +172,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model)",
+          "expr": "sum(rate(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model)",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -201,7 +201,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_request_total{status=\"error\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider) / sum(rate(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider)",
+          "expr": "sum(rate(llm_request_total{status=\"error\", instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider) / sum(rate(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider)",
           "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
@@ -224,17 +224,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
           "legendFormat": "P50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
           "legendFormat": "P95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(llm_request_duration_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le))",
           "legendFormat": "P99",
           "refId": "C"
         }
@@ -251,12 +251,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_ttft_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
           "legendFormat": "P50 {{model}} / {{provider}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.95, sum(rate(llm_ttft_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
           "legendFormat": "P95 {{model}} / {{provider}}",
           "refId": "B"
         }
@@ -273,12 +273,12 @@
       },
       "targets": [
         {
-          "expr": "rate(llm_tokens_per_second_sum{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m]) / rate(llm_tokens_per_second_count{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])",
+          "expr": "rate(llm_tokens_per_second_sum{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m]) / rate(llm_tokens_per_second_count{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])",
           "legendFormat": "avg {{model}} / {{provider}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_tokens_per_second_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_tokens_per_second_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
           "legendFormat": "P50 {{model}} / {{provider}}",
           "refId": "B"
         }
@@ -295,7 +295,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_request_duration_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
           "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
@@ -312,7 +312,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.95, sum(rate(llm_request_duration_seconds_bucket{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (le, model, provider))",
           "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
@@ -335,7 +335,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_input_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model)",
+          "expr": "sum(rate(llm_input_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model)",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -352,7 +352,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_output_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model)",
+          "expr": "sum(rate(llm_output_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model)",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -372,7 +372,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_cached_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider) / sum(rate(llm_input_tokens_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider)",
+          "expr": "sum(rate(llm_cached_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider) / sum(rate(llm_input_tokens_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (model, provider)",
           "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
@@ -395,7 +395,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_strategy_triggered_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (strategy, model, provider)",
+          "expr": "sum(rate(llm_strategy_triggered_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}[5m])) by (strategy, model, provider)",
           "legendFormat": "{{strategy}} ({{model}} / {{provider}})",
           "refId": "A"
         }
@@ -409,7 +409,7 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum(llm_strategy_triggered_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) by (strategy)",
+          "expr": "sum(llm_strategy_triggered_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) by (strategy)",
           "legendFormat": "{{strategy}}",
           "refId": "A"
         }
@@ -423,7 +423,7 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum(llm_request_total{model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) by (status)",
+          "expr": "sum(llm_request_total{instance=~\"$instance\", instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\", app_id=~\"$app_id\"}) by (status)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -458,7 +458,7 @@
       },
       "targets": [
         {
-          "expr": "llm_provider_health{model=~\"$model\", provider=~\"$provider\"}",
+          "expr": "llm_provider_health{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}",
           "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
@@ -478,7 +478,7 @@
       },
       "targets": [
         {
-          "expr": "llm_provider_score{model=~\"$model\", provider=~\"$provider\"}",
+          "expr": "llm_provider_score{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}",
           "legendFormat": "{{model}} / {{provider}}",
           "refId": "A"
         }
@@ -498,7 +498,7 @@
       },
       "targets": [
         {
-          "expr": "llm_score_component{model=~\"$model\", provider=~\"$provider\"}",
+          "expr": "llm_score_component{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}",
           "legendFormat": "{{model}} / {{provider}} - {{component}}",
           "refId": "A"
         }
@@ -521,12 +521,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(llm_probe_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.50, sum(rate(llm_probe_ttft_seconds_bucket{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
           "legendFormat": "P50 {{model}} / {{provider}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(llm_probe_ttft_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.95, sum(rate(llm_probe_ttft_seconds_bucket{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
           "legendFormat": "P95 {{model}} / {{provider}}",
           "refId": "B"
         }
@@ -547,7 +547,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_probe_total{model=~\"$model\", provider=~\"$provider\"}[5m])) by (model, provider, status)",
+          "expr": "sum(rate(llm_probe_total{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (model, provider, status)",
           "legendFormat": "{{model}} / {{provider}} {{status}}",
           "refId": "A"
         }
@@ -563,6 +563,20 @@
         "type": "datasource",
         "query": "prometheus",
         "current": { "text": "default", "value": "default" },
+        "hide": 0
+      },
+      {
+        "name": "instance",
+        "label": "实例",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(llm_request_total, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "current": { "text": "All", "value": "$__all" },
         "hide": 0
       },
       {
@@ -598,7 +612,7 @@
         "label": "应用ID",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "${datasource}" },
-        "query": "label_values(llm_request_total{model=~\"$model\", provider=~\"$provider\"}, app_id)",
+        "query": "label_values(llm_request_total{instance=~\"$instance\", model=~\"$model\", provider=~\"$provider\"}, app_id)",
         "refresh": 2,
         "includeAll": true,
         "allValue": ".*",
@@ -613,6 +627,6 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "LLM Infrastructure Monitor",
-  "uid": "kuafu-llm-infra",
+  "uid": "kuafu-llm-infra-02",
   "version": 3
 }

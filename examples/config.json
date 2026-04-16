@@ -1,0 +1,494 @@
+{
+  "llm_stability": {
+    "providers": {
+      "openai-next": {
+        "api_key": "sk-O7J1DF2Ce8so6bRdA1C037A2EaCf4922B41465099dCeD212",
+        "endpoints": {
+          "openai": {
+            "base_url": "http://152.53.52.170:3003/v1"
+          },
+          "anthropic": {
+            "base_url": "http://152.53.52.170:3003"
+          }
+        }
+      },
+      "ppio": {
+        "api_key": "sk_X3hlaxVt_Cuva-7DEMuT0fYwX4qgOF-Lwq2PlU2ioM4",
+        "endpoints": {
+          "openai": {
+            "base_url": "https://api.ppinfra.com/openai/v1"
+          },
+          "anthropic": {
+            "base_url": "https://api.ppinfra.com/anthropic"
+          }
+        }
+      },
+      "volces": {
+        "api_key": "76db9562-1da8-457c-bc67-1c1a9f35931f",
+        "endpoints": {
+          "openai": {
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3"
+          },
+          "anthropic": {
+            "base_url": "https://ark.cn-beijing.volces.com/api/v3"
+          }
+        }
+      },
+      "omnimaas": {
+        "api_key": "sk-mFxL0t3VcvzfFJijBdwS0RmE2qeRdKDyTV6jg8KRX0A",
+        "endpoints": {
+          "openai": {
+            "base_url": "http://18.136.201.255:3000/v1"
+          },
+          "anthropic": {
+            "base_url": "http://18.136.201.255:3000"
+          }
+        }
+      },
+      "mini-max": {
+        "api_key": "sk-api--NCMNhSLW0WX9Q31sYE5bu0G4abnQbU6Ao1COvSbAZNc8pTdEKsHQHGtZWi_elshkcknZZOacTc9Hc_aHN0LRQKDRlM00n4UJian0Cy3RpSpKoranZqtL9U",
+        "endpoints": {
+          "openai": {
+            "base_url": "https://api.minimaxi.com/v1"
+          },
+          "anthropic": {
+            "base_url": "https://api.minimaxi.com"
+          }
+        }
+      },
+      "deepseek": {
+        "api_key": "sk-da414e32ec1541efae93cac2e28ea634",
+        "endpoints": {
+          "openai": {
+            "base_url": "https://api.deepseek.com/v1"
+          }
+        }
+      },
+      "openai-next-claude": {
+        "api_key": "sk-lq2AlzZ7R0QS1Rlq4fFeAb7e9dF34cC39eD8122848A46362",
+        "endpoints": {
+          "anthropic": {
+            "base_url": "http://152.53.52.170:3003"
+          },
+          "openai": {
+            "base_url": "http://152.53.52.170:3003/v1"
+          }
+        }
+      }
+    },
+    "models": {
+      "deepseek-v3-2-251201": {
+        "providers": [
+          {
+            "provider": "volces",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "deepseek-v3-2-251201"
+          }
+        ]
+      },
+      "claude-opus-4-5-20251101": {
+        "providers": [
+          {
+            "provider": "openai-next-claude",
+            "endpoint": "anthropic",
+            "priority": 1,
+            "probe": true,
+            "model_id": "claude-opus-4-6"
+          },
+          {
+            "provider": "ppio",
+            "endpoint": "anthropic",
+            "priority": 2,
+            "probe": true,
+            "model_id": "pa/claude-opus-4-5-20251101"
+          },
+          {
+            "provider": "omnimaas",
+            "endpoint": "anthropic",
+            "priority": 3,
+            "probe": true,
+            "model_id": "claude-opus-4-6"
+          }
+        ]
+      },
+      "glm-4-7-251222": {
+        "providers": [
+          {
+            "provider": "volces",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true
+          }
+        ]
+      },
+      "claude-opus-4-6": {
+        "providers": [
+          {
+            "provider": "omnimaas",
+            "endpoint": "anthropic",
+            "priority": 1,
+            "probe": true
+          }
+        ]
+      },
+      "glm-5": {
+        "providers": [
+          {
+            "provider": "omnimaas",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true
+          }
+        ]
+      },
+      "MiniMax-M2.7-highspeed": {
+        "providers": [
+          {
+            "provider": "mini-max",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true
+          }
+        ]
+      },
+      "minimax/minimax-m2.7": {
+        "providers": [
+          {
+            "provider": "ppio",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true
+          }
+        ]
+      },
+      "gpt-4.1-mini-2025-04-14": {
+        "providers": [
+          {
+            "provider": "openai-next",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "gpt-4.1-mini-2025-04-14"
+          }
+        ]
+      },
+      "deepseek-chat": {
+        "providers": [
+          {
+            "provider": "deepseek",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "deepseek-chat"
+          }
+        ]
+      },
+      "gpt-4.1-2025-04-14": {
+        "providers": [
+          {
+            "provider": "openai-next",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "gpt-4.1-2025-04-14"
+          }
+        ]
+      },
+      "gpt-4o-mini-2024-07-18": {
+        "providers": [
+          {
+            "provider": "openai-next",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "gpt-4o-mini-2024-07-18"
+          }
+        ]
+      },
+      "gpt-5.3-codex": {
+        "providers": [
+          {
+            "provider": "openai-next",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "gpt-5.3-codex"
+          }
+        ]
+      },
+      "zai-org/glm-5": {
+        "providers": [
+          {
+            "provider": "ppio",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "zai-org/glm-5"
+          }
+        ]
+      },
+      "zai-org/glm-4.6": {
+        "providers": [
+          {
+            "provider": "ppio",
+            "endpoint": "openai",
+            "priority": 1,
+            "probe": true,
+            "model_id": "zai-org/glm-4.6"
+          }
+        ]
+      }
+    },
+    "strategies": {
+      "claude-opus-4-5-20251101": {
+        "primary": "claude-opus-4-5-20251101",
+        "fallback": [
+          "deepseek-v3-2-251201"
+        ],
+        "timeout": {
+          "ttft": 10,
+          "chunk_gap": 15,
+          "per_request": 300,
+          "total": 600
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 0.5
+      },
+      "claude-opus-4-6": {
+        "primary": "claude-opus-4-6",
+        "fallback": [
+          "deepseek-v3-2-251201"
+        ],
+        "timeout": {
+          "ttft": 10,
+          "chunk_gap": 15,
+          "per_request": 120,
+          "total": 180
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 5
+      },
+      "glm-5": {
+        "primary": "zai-org/glm-5",
+        "fallback": [
+          "MiniMax-M2.7-highspeed"
+        ],
+        "timeout": {
+          "ttft": 10,
+          "chunk_gap": 15,
+          "per_request": 300,
+          "total": 1200
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "minimax-m2.7-highspeed": {
+        "primary": "MiniMax-M2.7-highspeed",
+        "fallback": [
+          "glm-4-7-251222"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 5,
+          "per_request": 300,
+          "total": 1200
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1.5
+      },
+      "glm-4-7-251222": {
+        "primary": "glm-4-7-251222",
+        "fallback": [
+          "claude-opus-4-5-20251101"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 15,
+          "per_request": 240,
+          "total": 560
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 0.5
+      },
+      "deepseek-v3-2-251201": {
+        "primary": "deepseek-v3-2-251201",
+        "fallback": [
+          "gpt-4.1-2025-04-14"
+        ],
+        "timeout": {
+          "ttft": 30,
+          "chunk_gap": 20,
+          "per_request": 180,
+          "total": 360
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "gpt-4.1-mini-2025-04-14": {
+        "primary": "gpt-4.1-mini-2025-04-14",
+        "fallback": [
+          "deepseek-v3-2-251201",
+          "MiniMax-M2.7-highspeed"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 20,
+          "per_request": 100,
+          "total": 240
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "deepseek-chat": {
+        "primary": "deepseek-chat",
+        "fallback": [],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 20,
+          "per_request": 100,
+          "total": 240
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "gpt-4.1-2025-04-14": {
+        "primary": "gpt-4.1-2025-04-14",
+        "fallback": [
+          "glm-4-7-251222"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 20,
+          "per_request": 200,
+          "total": 1200
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "gpt-4o-mini-2024-07-18": {
+        "primary": "gpt-4o-mini-2024-07-18",
+        "fallback": [
+          "deepseek-v3-2-251201"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 20,
+          "per_request": 100,
+          "total": 240
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "gpt-5.3-codex": {
+        "primary": "gpt-5.3-codex",
+        "fallback": [
+          "glm-4-7-251222",
+          "claude-opus-4-5-20251101"
+        ],
+        "timeout": {
+          "ttft": 50,
+          "chunk_gap": 20,
+          "per_request": 100,
+          "total": 240
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "zai-org/glm-5": {
+        "primary": "zai-org/glm-5",
+        "fallback": [
+          "MiniMax-M2.7-highspeed"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 15,
+          "per_request": 300,
+          "total": 500
+        },
+        "max_retries": 2,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      },
+      "MiniMax-M2.7-highspeed": {
+        "primary": "MiniMax-M2.7-highspeed",
+        "fallback": [
+          "glm-4-7-251222"
+        ],
+        "timeout": {
+          "ttft": 20,
+          "chunk_gap": 20,
+          "per_request": 100,
+          "total": 240
+        },
+        "max_retries": 1,
+        "empty_frame_threshold": 5,
+        "slow_speed_threshold": 1
+      }
+    },
+    "health_check": {
+      "interval": 120,
+      "failure_threshold": 3,
+      "recovery_threshold": 3,
+      "timeout": 60,
+      "probe_max_tokens": 50,
+      "stagger_interval": 2,
+      "cooldown": 60
+    },
+    "metrics": {
+      "enabled": true,
+      "backend": "prometheus",
+      "port": 9091,
+      "label_keys": [
+        "app_id",
+        "cache_token",
+        "conversation_id"
+      ]
+    },
+    "alert": {
+      "channels": [
+        {
+          "type": "log"
+        },
+        {
+          "type": "feishu",
+          "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/267f8eb9-66ab-46b7-961b-28ef8bcf9b8b"
+        }
+      ],
+      "rules": {
+        "silence_seconds": 60
+      }
+    },
+    "recording": {
+      "enable": true,
+      "clickhouse": {
+        "host": "159.138.147.171",
+        "port": 8123,
+        "username": "default",
+        "password": "",
+        "secure": false,
+        "database": "llm_metrics",
+        "table": "llm_request_metrics",
+        "label_columns": [
+          "app_id",
+          "conversation_id"
+        ],
+        "batch_size": 500,
+        "flush_interval": 5,
+        "queue_size": 5000
+      }
+    }
+  }
+}

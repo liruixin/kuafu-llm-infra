@@ -34,7 +34,7 @@ Quick start::
 __version__ = "0.1.0"
 
 from .gateway import LLMClient, create_client
-from .types import TokenUsage, RequestContext
+from .types import TokenUsage, RequestContext, RequestRecord
 from .logging_setup import setup_logging
 
 __all__ = [
@@ -42,5 +42,6 @@ __all__ = [
     "create_client",
     "TokenUsage",
     "RequestContext",
+    "RequestRecord",
     "setup_logging",
 ]
