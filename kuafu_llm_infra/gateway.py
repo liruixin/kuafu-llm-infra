@@ -240,8 +240,9 @@ class LLMClient:
         # Alert dispatcher
         self._alert_dispatcher = self._create_alert_dispatcher(config)
 
-        # Record dispatcher（高维度数据收集，启动时初始化一次，不热更新）
+        # Record dispatcher（Redis 模式首次加载时用空配置返回 None，后续 _apply_config 首次触发时创建；创建后不再变）
         self._record_dispatcher = self._create_record_dispatcher(config)
+        self._recording_initialized = config_loaded  # 本地模式=True，Redis模式=False
 
         # Provider adapters
         self._adapters: Dict[str, BaseProvider] = {}
@@ -445,6 +446,16 @@ class LLMClient:
             self._engine._recorder._alert = self._alert_dispatcher
             self._health_checker._alert_dispatcher = self._alert_dispatcher
             logger.info(f"Alert dispatcher rebuilt: {new_alert_channels}")
+
+        # Recording 只在首次加载时创建，后续 Redis 配置更新不重建（CK 连接只建一次）
+        if not self._recording_initialized:
+            self._record_dispatcher = self._create_record_dispatcher(new_config)
+            if self._started and self._record_dispatcher:
+                self._record_dispatcher.start()
+            self._engine._recorder._recording = self._record_dispatcher
+            self._recording_initialized = True
+            if self._record_dispatcher:
+                logger.info("Record dispatcher initialized (first load)")
 
         logger.info("Configuration applied")
 
