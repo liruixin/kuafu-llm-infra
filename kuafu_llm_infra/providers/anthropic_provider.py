@@ -221,9 +221,12 @@ class AnthropicProvider(BaseProvider):
             resp = await coro
 
         content = ""
+        reasoning = ""
         tool_calls = []
         for block in resp.content:
-            if block.type == "text":
+            if block.type == "thinking":
+                reasoning += block.thinking
+            elif block.type == "text":
                 content += block.text
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(
@@ -247,6 +250,7 @@ class AnthropicProvider(BaseProvider):
 
         return ChatResponse(
             content=content,
+            reasoning_content=reasoning,
             model=resp.model,
             finish_reason=self._FINISH_REASON_MAP.get(resp.stop_reason, resp.stop_reason or "stop"),
             usage=usage,

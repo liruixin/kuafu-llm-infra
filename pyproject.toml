@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kuafu-llm-infra"
-version = "0.1.0"
+version = "0.2.0"
 description = "LLM infrastructure layer with multi-provider fallback, health monitoring, speed probing, and alerting."
 readme = "README.md"
 license = {text = "Apache-2.0"}
