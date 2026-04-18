@@ -10,7 +10,7 @@
 --     clickhouse:
 --       host: "your-clickhouse-host"
 --       database: "llm_metrics"
---       label_columns: [app_id, user_id, conversation_id, request_id]
+--       label_columns: [app_id, conversation_id]
 -- ============================================================================
 
 CREATE DATABASE IF NOT EXISTS llm_metrics;
@@ -23,9 +23,7 @@ CREATE TABLE IF NOT EXISTS llm_metrics.llm_request_metrics
 
     -- 业务维度（label_columns，按需增减，需与 YAML 配置一致）
     app_id              String                 DEFAULT '',
-    user_id             String                 DEFAULT '',
     conversation_id     String                 DEFAULT '',
-    request_id          String                 DEFAULT '',
 
     -- 模型维度（固定列）
     provider            LowCardinality(String),

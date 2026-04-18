@@ -331,6 +331,7 @@ class FallbackEngine:
                     )
                     await self._recorder.record_failure(
                         ctx, "total_timeout", f"timeout after {duration:.1f}s",
+                        duration=duration,
                     )
                     last_error = TimeoutError(f"Provider {ctx.provider_name} timed out")
                     failure_details.append(
@@ -349,6 +350,7 @@ class FallbackEngine:
                     )
                     await self._recorder.record_failure(
                         ctx, e.event.strategy, str(e.event.detail),
+                        duration=duration,
                     )
                     last_error = e
                     failure_details.append(
@@ -400,7 +402,7 @@ class FallbackEngine:
                         f"#{attempt[0]} {ctx.provider_name} → "
                         f"[{type(e).__name__}] {e} ({duration:.2f}s)"
                     )
-                    await self._recorder.record_failure(ctx, "error", str(e))
+                    await self._recorder.record_failure(ctx, "error", str(e), duration=duration)
                     last_error = e
                     failure_details.append(
                         f"#{attempt[0]} {ctx.provider_name} → [{type(e).__name__}] {e} ({duration:.2f}s)"
@@ -528,6 +530,7 @@ class FallbackEngine:
                         )
                         await self._recorder.record_failure(
                             ctx, e.event.strategy, str(e.event.detail),
+                            duration=duration,
                         )
                         last_error = e
                         failure_details.append(
@@ -595,7 +598,7 @@ class FallbackEngine:
                             f"流中异常([{type(e).__name__}] {e}, 不切换) "
                             f"({duration:.2f}s)"
                         )
-                        await self._recorder.record_failure(ctx, "error", str(e))
+                        await self._recorder.record_failure(ctx, "error", str(e), duration=duration)
                         return
 
                     logger.warning(
@@ -603,7 +606,7 @@ class FallbackEngine:
                         f"#{attempt[0]} {ctx.provider_name} → "
                         f"[{type(e).__name__}] {e} ({duration:.2f}s)"
                     )
-                    await self._recorder.record_failure(ctx, "error", str(e))
+                    await self._recorder.record_failure(ctx, "error", str(e), duration=duration)
                     last_error = e
                     failure_details.append(
                         f"#{attempt[0]} {ctx.provider_name} → [{type(e).__name__}] {e} ({duration:.2f}s)"

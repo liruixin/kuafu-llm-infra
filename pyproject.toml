@@ -32,6 +32,7 @@ dependencies = [
     "google-genai>=1.0",
     "prometheus-client>=0.20",
     "redis>=5.0",
+    "clickhouse-connect>=0.7",
 ]
 
 [project.optional-dependencies]

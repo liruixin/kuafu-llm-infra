@@ -139,9 +139,7 @@ llm_stability:
       table: "llm_request_metrics"
       label_columns:
         - app_id
-        - user_id
         - conversation_id
-        - request_id
       # port: 8123
       # username: "default"
       # password: ""

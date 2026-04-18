@@ -123,6 +123,8 @@ class RequestRecorder:
         ctx: RequestContext,
         reason: str,
         detail: str,
+        *,
+        duration: float = 0.0,
     ) -> None:
         """Record a failed request to scorer + metrics."""
         model = ctx.canonical_model
@@ -147,7 +149,7 @@ class RequestRecorder:
                 provider_name=provider,
                 labels=ctx.labels,
                 status="error",
-                duration_ms=0,
+                duration_ms=int(duration * 1000),
                 error_reason=reason,
                 error_detail=detail,
             ))
