@@ -585,8 +585,15 @@ await client.update_config(new_config, broadcast=True)
 metrics:
   enabled: true
   backend: prometheus
-  port: 9091                 # 启动 /metrics HTTP 端点
   label_keys: [module, env]
+```
+
+业务侧通过 `client.get_metrics()` 获取 Prometheus 格式数据，挂到自己的 HTTP 路由：
+
+```python
+@app.get("/metrics_infra")
+def metrics_infra():
+    return Response(client.get_metrics(), media_type="text/plain")
 ```
 
 推荐 Grafana Dashboard 面板：
@@ -660,7 +667,6 @@ llm_stability:
   metrics:
     enabled: true
     backend: prometheus
-    port: 9091
     label_keys: [module, env]
 
   state_backend:

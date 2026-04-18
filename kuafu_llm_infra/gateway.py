@@ -398,7 +398,7 @@ class LLMClient:
                 del self._adapters[key]
                 logger.info(f"Provider adapter removed: {key}")
 
-        # Metrics 只在首次加载时创建（Prometheus HTTP server 启动后不可变）
+        # Metrics 只在首次加载时创建
         if not self._metrics_initialized:
             self._metrics = self._create_metrics(new_config)
             self._scorer._metrics = self._metrics
@@ -407,7 +407,7 @@ class LLMClient:
             self._engine._stream_monitor._metrics = self._metrics
             self._health_checker._metrics = self._metrics
             self._metrics_initialized = True
-            logger.info(f"Metrics initialized: backend={new_config.metrics.backend}, port={new_config.metrics.port}")
+            logger.info(f"Metrics initialized: backend={new_config.metrics.backend}")
 
         # 更新 scorer 的 health_config（cooldown、failure_threshold 等）
         self._scorer._health_config = new_config.health_check
