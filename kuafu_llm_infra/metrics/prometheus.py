@@ -36,7 +36,6 @@ class PrometheusCollector(MetricsCollector):
     def __init__(
         self,
         label_keys: Optional[List[str]] = None,
-        port: Optional[int] = None,
     ) -> None:
         if not _HAS_PROMETHEUS:
             raise ImportError(
@@ -61,8 +60,9 @@ class PrometheusCollector(MetricsCollector):
                 defn.name, defn.description, label_names,
             )
 
-        if port is not None:
-            prom.start_http_server(port)
+    def get_metrics(self) -> bytes:
+        """返回 Prometheus 文本格式的指标数据，供业务侧 HTTP 接口调用。"""
+        return prom.generate_latest()
 
     # ------------------------------------------------------------------
     # Label computation

@@ -113,7 +113,6 @@ class MetricsConfig(BaseModel):
     """Metrics backend configuration."""
     enabled: bool = True
     backend: str = "simple"  # "simple" | "prometheus"
-    port: Optional[int] = None  # Only for prometheus
     label_keys: List[str] = Field(default_factory=list)  # Custom label names for request-level metrics
 
 

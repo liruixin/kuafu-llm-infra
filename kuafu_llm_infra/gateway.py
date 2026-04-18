@@ -292,6 +292,12 @@ class LLMClient:
         self._started = False
         logger.info("LLMClient shutdown")
 
+    def get_metrics(self) -> bytes:
+        """返回 Prometheus 文本格式指标数据，业务侧挂到自己的 HTTP 路由即可。"""
+        if hasattr(self._metrics, "get_metrics"):
+            return self._metrics.get_metrics()
+        return b""
+
     async def push_config(
         self,
         new_config: Union[Dict[str, Any], LLMStabilityConfig],
@@ -481,7 +487,6 @@ class LLMClient:
                 from .metrics.prometheus import PrometheusCollector
                 return PrometheusCollector(
                     label_keys=config.metrics.label_keys,
-                    port=config.metrics.port,
                 )
             except ImportError:
                 logger.warning("prometheus_client not installed, using simple metrics")
