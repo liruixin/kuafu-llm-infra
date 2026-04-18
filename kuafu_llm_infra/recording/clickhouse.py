@@ -48,6 +48,14 @@ class ClickHouseRecordSink(BaseRecordSink):
         self._table = table
         self._label_columns = list(label_columns or [])
 
+        # 启动时同步探测连接，错误立即暴露而不是首次写入时才发现
+        try:
+            self._client.query("SELECT 1")
+        except Exception as exc:
+            raise RuntimeError(
+                f"ClickHouse ping failed (host={host} db={database}): {exc}"
+            ) from exc
+
         # 预计算列名列表（固定列 + 动态 label 列），避免每次 write_batch 重复拼接
         self._column_names = (
             ["event_time"]
@@ -57,6 +65,10 @@ class ClickHouseRecordSink(BaseRecordSink):
                 "cache_read_tokens", "total_latency_ms", "ttft_ms",
                 "status", "error_code",
             ]
+        )
+        logger.info(
+            "ClickHouse sink ready: host=%s db=%s table=%s columns=%s",
+            host, database, table, self._column_names,
         )
 
     async def write_batch(self, records: List[RequestRecord]) -> None:
@@ -87,7 +99,7 @@ class ClickHouseRecordSink(BaseRecordSink):
                 self._table, rows, column_names=self._column_names,
             ),
         )
-        logger.debug("Flushed %d records to ClickHouse", len(records))
+        logger.info("Flushed %d records to ClickHouse", len(records))
 
     async def close(self) -> None:
         self._client.close()

@@ -67,6 +67,8 @@ def setup_logging(
         "kuafu_llm_infra.stream_monitor",
         "kuafu_llm_infra.scorer",
         "kuafu_llm_infra.recorder",
+        "kuafu_llm_infra.recording.dispatcher",
+        "kuafu_llm_infra.recording.clickhouse",
     ):
         lg = logging.getLogger(name)
         lg.addHandler(request_handler)

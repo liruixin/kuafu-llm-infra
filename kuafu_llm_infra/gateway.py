@@ -521,13 +521,21 @@ class LLMClient:
     @staticmethod
     def _create_record_dispatcher(config: LLMStabilityConfig) -> Optional[RecordDispatcher]:
         if not config.recording.enabled:
+            logger.info("Recording disabled (recording.enabled=false in config)")
             return None
         ch_cfg = config.recording.clickhouse
         if not ch_cfg.host:
-            logger.warning("Recording enabled but clickhouse.host not set, skipping")
+            logger.error("Recording enabled but clickhouse.host not set, skipping")
             return None
         try:
             from .recording.clickhouse import ClickHouseRecordSink
+        except ImportError:
+            logger.error(
+                "Recording enabled but clickhouse-connect not installed. "
+                "Run: pip install clickhouse-connect",
+            )
+            return None
+        try:
             sink = ClickHouseRecordSink(
                 host=ch_cfg.host,
                 database=ch_cfg.database,
@@ -538,9 +546,21 @@ class LLMClient:
                 password=ch_cfg.password,
                 secure=ch_cfg.secure,
             )
-        except ImportError:
-            logger.warning("clickhouse-connect not installed, skipping recording")
+        except Exception as exc:
+            logger.error(
+                "Failed to init ClickHouse sink (host=%s db=%s table=%s): %s",
+                ch_cfg.host, ch_cfg.database, ch_cfg.table, exc,
+            )
             return None
+        logger.info(
+            "Recording dispatcher created: host=%s db=%s table=%s "
+            "labels=%s batch=%d flush=%.1fs queue=%d",
+            ch_cfg.host, ch_cfg.database, ch_cfg.table,
+            ch_cfg.label_columns,
+            config.recording.batch_size,
+            config.recording.flush_interval,
+            config.recording.queue_size,
+        )
         return RecordDispatcher(
             sinks=[sink],
             batch_size=config.recording.batch_size,

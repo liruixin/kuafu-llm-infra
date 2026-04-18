@@ -34,17 +34,35 @@ class RecordDispatcher:
         self._flush_interval = flush_interval
         self._queue: asyncio.Queue[RequestRecord] = asyncio.Queue(maxsize=queue_size)
         self._task: Optional[asyncio.Task] = None
+        self._collected = 0
+        self._dropped = 0
 
     def collect(self, record: RequestRecord) -> None:
         """主链路调用，put_nowait 非阻塞，队列满则 drop。"""
         try:
             self._queue.put_nowait(record)
+            self._collected += 1
+            if self._collected <= 5 or self._collected % 100 == 0:
+                logger.info(
+                    "Record collected (total=%d, queue=%d)",
+                    self._collected, self._queue.qsize(),
+                )
         except asyncio.QueueFull:
-            logger.warning("Record queue full, dropping record")
+            self._dropped += 1
+            logger.warning("Record queue full, dropped=%d", self._dropped)
 
     def start(self) -> None:
         """Start the background batch worker."""
-        self._task = asyncio.get_event_loop().create_task(self._flush_worker())
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        self._task = loop.create_task(self._flush_worker())
+        logger.info(
+            "RecordDispatcher started (batch=%d flush=%.1fs queue_max=%d sinks=%d)",
+            self._batch_size, self._flush_interval,
+            self._queue.maxsize, len(self._sinks),
+        )
 
     async def stop(self) -> None:
         """优雅关闭：排空队列 → flush 最后一批 → 关闭 sink。"""
