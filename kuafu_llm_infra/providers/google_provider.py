@@ -282,12 +282,16 @@ class GoogleProvider(BaseProvider):
 
         candidate = resp.candidates[0]
         content = ""
+        reasoning = ""
         tool_calls: List[ToolCall] = []
 
         if candidate.content and candidate.content.parts:
             for part in candidate.content.parts:
                 if part.text:
-                    content += part.text
+                    if getattr(part, "thought", False):
+                        reasoning += part.text
+                    else:
+                        content += part.text
                 if part.function_call:
                     fc = part.function_call
                     tool_calls.append(ToolCall(
@@ -306,6 +310,7 @@ class GoogleProvider(BaseProvider):
 
         return ChatResponse(
             content=content,
+            reasoning_content=reasoning,
             model=model,
             finish_reason=finish_reason,
             usage=usage,

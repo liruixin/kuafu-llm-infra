@@ -450,7 +450,6 @@
     "metrics": {
       "enabled": true,
       "backend": "prometheus",
-      "port": 9091,
       "label_keys": [
         "app_id",
         "cache_token",

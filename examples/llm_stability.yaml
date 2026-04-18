@@ -126,7 +126,6 @@ llm_stability:
   metrics:
     enabled: true
     backend: simple           # "simple" (in-memory) | "prometheus"
-    # port: 9091              # Uncomment to enable Prometheus /metrics endpoint
     label_keys:               # Custom label names (deprecated, no longer in Prometheus)
       - user_id
       - module

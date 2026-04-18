@@ -301,6 +301,12 @@ class LLMClient:
         self._started = False
         logger.info("LLMClient shutdown")
 
+    def get_metrics(self) -> bytes:
+        """返回 Prometheus 文本格式指标数据，业务侧挂到自己的 HTTP 路由即可。"""
+        if hasattr(self._metrics, "get_metrics"):
+            return self._metrics.get_metrics()
+        return b""
+
     async def push_config(
         self,
         new_config: Union[Dict[str, Any], LLMStabilityConfig],
@@ -401,7 +407,7 @@ class LLMClient:
                 del self._adapters[key]
                 logger.info(f"Provider adapter removed: {key}")
 
-        # Metrics 只在首次加载时创建（Prometheus HTTP server 启动后不可变）
+        # Metrics 只在首次加载时创建
         if not self._metrics_initialized:
             self._metrics = self._create_metrics(new_config)
             self._scorer._metrics = self._metrics
@@ -410,7 +416,7 @@ class LLMClient:
             self._engine._stream_monitor._metrics = self._metrics
             self._health_checker._metrics = self._metrics
             self._metrics_initialized = True
-            logger.info(f"Metrics initialized: backend={new_config.metrics.backend}, port={new_config.metrics.port}")
+            logger.info(f"Metrics initialized: backend={new_config.metrics.backend}")
 
         # 更新 scorer 的 health_config（cooldown、failure_threshold 等）
         self._scorer._health_config = new_config.health_check
@@ -490,7 +496,6 @@ class LLMClient:
                 from .metrics.prometheus import PrometheusCollector
                 return PrometheusCollector(
                     label_keys=config.metrics.label_keys,
-                    port=config.metrics.port,
                 )
             except ImportError:
                 logger.warning("prometheus_client not installed, using simple metrics")

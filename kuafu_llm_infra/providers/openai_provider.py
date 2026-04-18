@@ -124,8 +124,24 @@ class OpenAIProvider(BaseProvider):
                 for tc in choice.message.tool_calls
             ]
 
+        raw_content = choice.message.content or ""
+
+        # 提取思考内容：两种格式
+        # 1) 独立字段 reasoning_content（DeepSeek 风格）
+        reasoning = getattr(choice.message, "reasoning_content", None) or ""
+        # 2) <think> 标签嵌在 content 里（MiniMax、开源模型风格）
+        if not reasoning:
+            think_matches = self._THINK_RE.findall(raw_content)
+            if think_matches:
+                reasoning = "\n".join(
+                    m.removeprefix("<think>").removesuffix("</think>").strip()
+                    for m in think_matches
+                )
+        clean_content = self._THINK_RE.sub("", raw_content).strip()
+
         return ChatResponse(
-            content=self._THINK_RE.sub("", choice.message.content or ""),
+            content=clean_content,
+            reasoning_content=reasoning,
             model=resp.model,
             finish_reason=choice.finish_reason or "stop",
             usage=usage,

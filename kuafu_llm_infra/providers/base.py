@@ -48,6 +48,7 @@ class ToolCall:
 class ChatResponse:
     """Non-streaming LLM response."""
     content: str = ""
+    reasoning_content: str = ""  # 模型思考过程（DeepSeek reasoning_content / Anthropic thinking block / Gemini thought part）
     model: str = ""
     finish_reason: str = "stop"
     usage: TokenUsage = field(default_factory=TokenUsage)
