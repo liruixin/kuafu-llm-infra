@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
-from ..types import RequestContext, TokenUsage
+from ..types import RequestContext
 from ..config.schema import (
     StrategyConfig,
     LLMStabilityConfig,
@@ -19,7 +19,6 @@ from ..config.schema import (
 from ..providers.base import BaseProvider, ChatResponse, StreamChunk
 from ..state.backend import StateBackend
 from ..metrics.collector import MetricsCollector, NoopCollector
-from ..metrics import registry as m
 from ..alert.dispatcher import AlertDispatcher
 from ..recording.dispatcher import RecordDispatcher
 from .scorer import Scorer
