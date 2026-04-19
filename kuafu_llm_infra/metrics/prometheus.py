@@ -30,6 +30,17 @@ except ImportError:  # pragma: no cover
     _HAS_PROMETHEUS = False
 
 
+def get_metrics() -> bytes:
+    """返回 Prometheus 文本格式指标数据，供业务侧 HTTP 接口调用。
+
+    直接读全局 REGISTRY，不依赖 LLMClient 实例。未安装 prometheus_client
+    时返回空 bytes，避免业务侧报错。
+    """
+    if not _HAS_PROMETHEUS:
+        return b""
+    return prom.generate_latest()
+
+
 class PrometheusCollector(MetricsCollector):
     """Metrics collector backed by prometheus_client."""
 
@@ -59,10 +70,6 @@ class PrometheusCollector(MetricsCollector):
             self._instruments[defn.name] = cls(
                 defn.name, defn.description, label_names,
             )
-
-    def get_metrics(self) -> bytes:
-        """返回 Prometheus 文本格式的指标数据，供业务侧 HTTP 接口调用。"""
-        return prom.generate_latest()
 
     # ------------------------------------------------------------------
     # Label computation

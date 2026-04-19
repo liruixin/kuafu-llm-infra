@@ -36,6 +36,7 @@ __version__ = "0.2.3"
 from .gateway import LLMClient, create_client
 from .types import TokenUsage, RequestContext
 from .logging_setup import setup_logging
+from .metrics.prometheus import get_metrics
 
 __all__ = [
     "LLMClient",
@@ -43,4 +44,5 @@ __all__ = [
     "TokenUsage",
     "RequestContext",
     "setup_logging",
+    "get_metrics",
 ]
