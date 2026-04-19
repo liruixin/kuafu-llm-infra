@@ -23,7 +23,7 @@ _INITIALIZED = False
 
 
 def setup_logging(
-    log_dir: str = "llm-infra-log",
+    log_dir: str = "kuafu-llm-infra-log",
     *,
     console_level: int = logging.INFO,
     file_level: int = logging.DEBUG,
