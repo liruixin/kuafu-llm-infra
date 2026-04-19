@@ -17,7 +17,7 @@ from logging.handlers import RotatingFileHandler
 
 
 def setup_logging(
-    log_dir: str = "logs",
+    log_dir: str = "kuafu-llm-infra-log",
     *,
     console_level: int = logging.INFO,
     file_level: int = logging.DEBUG,
