@@ -304,9 +304,8 @@ class LLMClient:
 
     def get_metrics(self) -> bytes:
         """返回 Prometheus 文本格式指标数据，业务侧挂到自己的 HTTP 路由即可。"""
-        if hasattr(self._metrics, "get_metrics"):
-            return self._metrics.get_metrics()
-        return b""
+        from .metrics.prometheus import get_metrics as _get_metrics
+        return _get_metrics()
 
     async def push_config(
         self,
