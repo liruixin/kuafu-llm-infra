@@ -133,13 +133,19 @@ class GoogleProvider(BaseProvider):
                         args = json.loads(args_str)
                     except (json.JSONDecodeError, TypeError):
                         args = {}
-                    parts.append(types.Part(
-                        function_call=types.FunctionCall(
+                    part_kwargs: Dict[str, Any] = {
+                        "function_call": types.FunctionCall(
                             id=tc.get("id", ""),
                             name=func.get("name", ""),
                             args=args,
                         ),
-                    ))
+                    }
+                    # Gemini 3 / 2.5 thinking 模型要求回传 thought_signature，
+                    # 业务侧把上一轮拿到的 signature 放在 tool_call dict 顶层即可。
+                    sig = tc.get("thought_signature")
+                    if sig is not None:
+                        part_kwargs["thought_signature"] = sig
+                    parts.append(types.Part(**part_kwargs))
 
                 if parts:
                     contents.append(types.Content(role="model", parts=parts))
@@ -303,6 +309,7 @@ class GoogleProvider(BaseProvider):
                                 dict(fc.args) if fc.args else {},
                             ),
                         ),
+                        thought_signature=getattr(part, "thought_signature", None),
                     ))
 
         usage = self._extract_usage(resp.usage_metadata)
@@ -388,6 +395,7 @@ class GoogleProvider(BaseProvider):
                                     dict(fc.args) if fc.args else {},
                                 ),
                             ),
+                            thought_signature=getattr(part, "thought_signature", None),
                         )],
                         raw=chunk,
                     )

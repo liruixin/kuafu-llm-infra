@@ -42,6 +42,9 @@ class ToolCall:
     type: str = "function"
     function: ToolCallFunction = field(default_factory=ToolCallFunction)
     index: Optional[int] = None  # Stream delta index (OpenAI compatibility)
+    # Gemini thinking models only — 对其他 provider 永远为 None。业务侧回传消息时
+    # 只要把它原样放回 tool_call dict 的顶层 key，Google provider 会自动回填到 Part。
+    thought_signature: Optional[bytes] = None
 
 
 @dataclass

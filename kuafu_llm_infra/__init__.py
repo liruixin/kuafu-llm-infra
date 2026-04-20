@@ -31,7 +31,7 @@ Quick start::
     print(resp.content)
 """
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 from .gateway import LLMClient, create_client
 from .types import TokenUsage, RequestContext
