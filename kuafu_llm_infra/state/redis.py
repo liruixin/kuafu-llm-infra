@@ -45,10 +45,9 @@ class RedisBackend(StateBackend):
                 "Install with: pip install redis"
             )
 
-        kwargs = {"decode_responses": True}
-        if ssl:
-            kwargs["ssl"] = True
-        self._redis = aioredis.from_url(url, **kwargs)
+        # SSL 由 URL scheme 决定（rediss:// = 启用），不再显式传 ssl kwarg
+        # 避免 redis-py 5+ 的 AbstractConnection 不接受 ssl 参数。
+        self._redis = aioredis.from_url(url, decode_responses=True)
         self._prefix = key_prefix
         self._instance_id = str(uuid.uuid4())[:8]
 
