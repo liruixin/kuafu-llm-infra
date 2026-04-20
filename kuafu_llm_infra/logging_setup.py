@@ -1,12 +1,13 @@
 """
 日志配置工具。
 
-将库产生的日志按职责分文件输出：
-- request.log  — 请求链路日志（engine / stream_monitor / scorer / recorder）
-- probe.log    — 后台探测日志（health_checker）
-- third-party.log — 第三方 SDK 日志（openai / anthropic / httpx / httpcore）
+将库产生的日志按职责分文件输出到 ``log_dir`` 下，**完全隔离**宿主 app：
+- infra.log       — 兜底：gateway / providers / metrics / state / config 等
+- request.log     — 请求链路：engine / stream_monitor / scorer / recorder
+- probe.log       — 后台探测与告警：health_checker / alert
+- third-party.log — 第三方 SDK：openai / anthropic / httpx / httpcore
 
-控制台只输出 INFO 及以上级别的库日志，第三方库日志不打到控制台。
+不写控制台、不冒泡到 root logger，调用一次 ``setup_logging()`` 即可。
 """
 
 from __future__ import annotations
@@ -15,53 +16,53 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 
+_INITIALIZED = False
+
 
 def setup_logging(
     log_dir: str = "kuafu-llm-infra-log",
     *,
-    console_level: int = logging.INFO,
     file_level: int = logging.DEBUG,
     max_bytes: int = 50 * 1024 * 1024,  # 50MB
     backup_count: int = 5,
 ) -> None:
     """
-    配置 kuafu-llm-infra 日志分文件输出。
+    把 kuafu-llm-infra 的所有日志引流到 ``log_dir`` 下的分文件。
+
+    重复调用安全（首次生效，后续 no-op）。不会添加控制台 handler，
+    不会冒泡到 root logger，宿主 app 的日志系统完全不受影响。
 
     Args:
-        log_dir: 日志目录，相对于工作目录。
-        console_level: 控制台输出级别（默认 INFO）。
+        log_dir: 日志目录，相对工作目录。默认 ``./kuafu-llm-infra-log``。
         file_level: 文件输出级别（默认 DEBUG）。
         max_bytes: 单个日志文件最大字节数。
         backup_count: 轮转保留文件数。
     """
+    global _INITIALIZED
+    if _INITIALIZED:
+        return
+    _INITIALIZED = True
+
     os.makedirs(log_dir, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 
-    fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
-    )
+    def _file_handler(filename: str) -> RotatingFileHandler:
+        h = RotatingFileHandler(
+            os.path.join(log_dir, filename),
+            maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
+        )
+        h.setFormatter(fmt)
+        h.setLevel(file_level)
+        return h
 
-    # ------------------------------------------------------------------
-    # 1. 控制台：只输出库的 INFO+，第三方库静默
-    # ------------------------------------------------------------------
-    console = logging.StreamHandler()
-    console.setFormatter(fmt)
-    console.setLevel(console_level)
-
+    # 顶层 logger：兜底写 infra.log，阻断冒泡到 root。
     lib_root = logging.getLogger("kuafu_llm_infra")
     lib_root.setLevel(file_level)
-    lib_root.addHandler(console)
+    lib_root.propagate = False
+    lib_root.addHandler(_file_handler("infra.log"))
 
-    # ------------------------------------------------------------------
-    # 2. request.log — 请求链路（engine / stream_monitor / scorer / recorder）
-    #    这些日志既写文件，也冒泡到控制台（通过父 logger）
-    # ------------------------------------------------------------------
-    request_handler = RotatingFileHandler(
-        os.path.join(log_dir, "request.log"),
-        maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
-    )
-    request_handler.setFormatter(fmt)
-    request_handler.setLevel(file_level)
-
+    # request.log — 请求链路
+    request_handler = _file_handler("request.log")
     for name in (
         "kuafu_llm_infra.engine",
         "kuafu_llm_infra.stream_monitor",
@@ -70,37 +71,22 @@ def setup_logging(
     ):
         lg = logging.getLogger(name)
         lg.addHandler(request_handler)
+        lg.propagate = False  # 避免同一条日志同时写到 infra.log
 
-    # ------------------------------------------------------------------
-    # 3. probe.log — 后台探测 + 探测告警（不打控制台）
-    # ------------------------------------------------------------------
-    probe_handler = RotatingFileHandler(
-        os.path.join(log_dir, "probe.log"),
-        maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
-    )
-    probe_handler.setFormatter(fmt)
-    probe_handler.setLevel(file_level)
-
+    # probe.log — 后台探测与告警
+    probe_handler = _file_handler("probe.log")
     for name in (
         "kuafu_llm_infra.health_checker",
         "kuafu_llm_infra.alert",
     ):
         lg = logging.getLogger(name)
         lg.addHandler(probe_handler)
-        lg.propagate = False  # 不冒泡到控制台，只写文件
+        lg.propagate = False
 
-    # ------------------------------------------------------------------
-    # 4. third-party.log — SDK / HTTP 库日志（不打控制台）
-    # ------------------------------------------------------------------
-    tp_handler = RotatingFileHandler(
-        os.path.join(log_dir, "third-party.log"),
-        maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
-    )
-    tp_handler.setFormatter(fmt)
-    tp_handler.setLevel(file_level)
-
+    # third-party.log — SDK / HTTP 库
+    tp_handler = _file_handler("third-party.log")
     for name in ("openai", "anthropic", "httpx", "httpcore"):
         lg = logging.getLogger(name)
         lg.setLevel(file_level)
         lg.addHandler(tp_handler)
-        lg.propagate = False  # 不冒泡到 root，避免打到控制台
+        lg.propagate = False
