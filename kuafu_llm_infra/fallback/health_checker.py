@@ -259,15 +259,18 @@ class HealthChecker:
                     f"连续失败 {card.probe_consecutive_failures} 次，标记不可用 "
                     f"- [{type(e).__name__}] {error_detail}"
                 )
-                if was_healthy and self._alert_dispatcher:
-                    self._alert_dispatcher.dispatch(AlertEvent(
-                        level="warning",
-                        title="提供商标记不可用",
-                        message=(
-                            f"({canonical_model}, {provider_name}) 连续探测失败 "
-                            f"{card.probe_consecutive_failures} 次，已标记为不可用。"
-                            f"最近错误: [{type(e).__name__}] {error_detail}"
-                        ),
-                        provider=provider_name,
-                        model=canonical_model,
-                    ))
+                # TODO: 探测级 warning 告警暂不发飞书，避免与"提供商耗尽"CRITICAL 混淆刷屏。
+                # 后续从配置读取独立的 alert 渠道（例如只发日志/单独的低优先级 webhook），
+                # 与 all_providers_exhausted 的 CRITICAL 通道分离。
+                # if was_healthy and self._alert_dispatcher:
+                #     self._alert_dispatcher.dispatch(AlertEvent(
+                #         level="warning",
+                #         title="提供商标记不可用",
+                #         message=(
+                #             f"({canonical_model}, {provider_name}) 连续探测失败 "
+                #             f"{card.probe_consecutive_failures} 次，已标记为不可用。"
+                #             f"最近错误: [{type(e).__name__}] {error_detail}"
+                #         ),
+                #         provider=provider_name,
+                #         model=canonical_model,
+                #     ))
