@@ -63,6 +63,7 @@ class ChatResponse:
 class StreamChunk:
     """A single chunk in a streaming response."""
     content: str = ""
+    reasoning_content: str = ""  # 增量思考内容（DeepSeek reasoning_content / Anthropic thinking / Gemini thought）
     finish_reason: Optional[str] = None
     usage: Optional[TokenUsage] = None  # Present on final chunk if SDK supports it
     tool_calls: Optional[List[ToolCall]] = None  # Incremental tool call deltas

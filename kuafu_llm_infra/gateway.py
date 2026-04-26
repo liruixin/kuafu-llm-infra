@@ -65,9 +65,12 @@ logger = logging.getLogger("kuafu_llm_infra.gateway")
 class _Delta:
     """Mimics ``chunk.choices[0].delta`` in OpenAI streaming."""
     def __init__(self, content: Optional[str] = None,
-                 tool_calls: Optional[List[ToolCall]] = None) -> None:
+                 tool_calls: Optional[List[ToolCall]] = None,
+                 reasoning_content: Optional[str] = None) -> None:
         self.content = content
         self.tool_calls = tool_calls
+        # DeepSeek reasoning 模型在流式增量中通过该字段返回思考内容；其他 provider 默认 None。
+        self.reasoning_content = reasoning_content
 
 
 class _StreamChoice:
@@ -81,17 +84,26 @@ class _StreamChoice:
 class _Message:
     """Mimics ``response.choices[0].message``."""
     def __init__(self, content: str,
-                 tool_calls: Optional[List[ToolCall]] = None) -> None:
+                 tool_calls: Optional[List[ToolCall]] = None,
+                 reasoning_content: Optional[str] = None) -> None:
         self.role = "assistant"
         self.content = content
         self.tool_calls = tool_calls
+        # DeepSeek reasoning_content / Anthropic thinking / Gemini thought 的合并文本；
+        # 思考模型回传时必须带上，否则 deepseek-v4-pro 等会 400。
+        self.reasoning_content = reasoning_content
 
 
 class _Choice:
     """Mimics ``response.choices[0]`` for non-streaming."""
     def __init__(self, content: str, finish_reason: str = "stop",
-                 tool_calls: Optional[List[ToolCall]] = None) -> None:
-        self.message = _Message(content, tool_calls=tool_calls)
+                 tool_calls: Optional[List[ToolCall]] = None,
+                 reasoning_content: Optional[str] = None) -> None:
+        self.message = _Message(
+            content,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+        )
         self.finish_reason = finish_reason
         self.index = 0
 
@@ -100,12 +112,14 @@ class _StreamChunkWrapper:
     """Wraps StreamChunk to match OpenAI SDK streaming chunk structure.
 
     Exposes ``choices[0].delta.content``, ``choices[0].delta.tool_calls``,
-    ``choices[0].finish_reason`` — identical to OpenAI SDK.
+    ``choices[0].delta.reasoning_content``, ``choices[0].finish_reason`` —
+    identical to OpenAI SDK (DeepSeek reasoning 模型用 reasoning_content)。
     """
     def __init__(self, chunk: StreamChunk) -> None:
         delta = _Delta(
             content=chunk.content or None,
             tool_calls=chunk.tool_calls,
+            reasoning_content=chunk.reasoning_content or None,
         )
         self.choices = [_StreamChoice(
             delta=delta,
@@ -119,13 +133,15 @@ class _CompletionResponse:
     """OpenAI-compatible completion response.
 
     Exposes ``choices[0].message.content``, ``choices[0].message.tool_calls``,
-    ``choices[0].finish_reason`` — identical to OpenAI SDK.
+    ``choices[0].message.reasoning_content``, ``choices[0].finish_reason`` —
+    identical to OpenAI SDK (DeepSeek reasoning 模型用 reasoning_content)。
     """
     def __init__(self, chat_response: ChatResponse) -> None:
         self.choices = [_Choice(
             chat_response.content,
             chat_response.finish_reason,
             tool_calls=chat_response.tool_calls,
+            reasoning_content=chat_response.reasoning_content or None,
         )]
         self.model = chat_response.model
         self.usage = chat_response.usage

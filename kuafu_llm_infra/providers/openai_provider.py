@@ -261,6 +261,7 @@ class OpenAIProvider(BaseProvider):
             if text or delta_tool_calls or usage or chunk.choices[0].finish_reason or is_thinking_frame:
                 yield StreamChunk(
                     content=text,
+                    reasoning_content=reasoning,
                     finish_reason=chunk.choices[0].finish_reason,
                     usage=usage,
                     tool_calls=delta_tool_calls,
