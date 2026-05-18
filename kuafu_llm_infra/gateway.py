@@ -79,19 +79,27 @@ class _StreamChoice:
 
 
 class _Message:
-    """Mimics ``response.choices[0].message``."""
+    """Mimics ``response.choices[0].message``.
+
+    ``reasoning_content`` 透传上游模型的推理文本（DeepSeek reasoning_content /
+    Anthropic thinking block / Gemini thought part）。空字符串表示该模型无推理内容。
+    """
     def __init__(self, content: str,
-                 tool_calls: Optional[List[ToolCall]] = None) -> None:
+                 tool_calls: Optional[List[ToolCall]] = None,
+                 reasoning_content: str = "") -> None:
         self.role = "assistant"
         self.content = content
         self.tool_calls = tool_calls
+        self.reasoning_content = reasoning_content
 
 
 class _Choice:
     """Mimics ``response.choices[0]`` for non-streaming."""
     def __init__(self, content: str, finish_reason: str = "stop",
-                 tool_calls: Optional[List[ToolCall]] = None) -> None:
-        self.message = _Message(content, tool_calls=tool_calls)
+                 tool_calls: Optional[List[ToolCall]] = None,
+                 reasoning_content: str = "") -> None:
+        self.message = _Message(content, tool_calls=tool_calls,
+                                reasoning_content=reasoning_content)
         self.finish_reason = finish_reason
         self.index = 0
 
@@ -126,6 +134,7 @@ class _CompletionResponse:
             chat_response.content,
             chat_response.finish_reason,
             tool_calls=chat_response.tool_calls,
+            reasoning_content=chat_response.reasoning_content,
         )]
         self.model = chat_response.model
         self.usage = chat_response.usage
