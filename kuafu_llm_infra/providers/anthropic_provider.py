@@ -60,6 +60,12 @@ class AnthropicProvider(BaseProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    # Anthropic messages 数组里每条只认 role + content,
+    # OpenAI/DeepSeek 协议带的 reasoning_content / name / tool_call_id 等额外字段
+    # 必须在适配层显式剥掉,否则 Anthropic API 校验拒(400 BadRequest,且 openai-next
+    # 这种代理网关会把真实错因吞成空字符串,排查痛苦)。
+    _ANTHROPIC_MSG_KEYS = frozenset({"role", "content"})
+
     @staticmethod
     def _convert_messages(
         messages: List[Dict[str, Any]],
@@ -70,7 +76,8 @@ class AnthropicProvider(BaseProvider):
         - ``system`` messages → extracted as top-level system prompt
         - ``assistant`` messages with ``tool_calls`` → Anthropic ``tool_use`` blocks
         - ``tool`` messages → Anthropic ``tool_result`` blocks (merged into user turn)
-        - Other messages → passed through as-is
+        - Other messages → 只保留 role + content,过滤 reasoning_content / name / tool_call_id 等
+          OpenAI/DeepSeek 协议字段(Anthropic 不认,会 400)
         """
         system_parts: List[str] = []
         converted: List[Dict[str, Any]] = []
@@ -107,7 +114,11 @@ class AnthropicProvider(BaseProvider):
                         })
                     converted.append({"role": "assistant", "content": blocks})
                 else:
-                    converted.append({k: v for k, v in msg.items()})
+                    # 只保留 Anthropic 接受的字段,过滤 reasoning_content 等
+                    converted.append({
+                        k: v for k, v in msg.items()
+                        if k in AnthropicProvider._ANTHROPIC_MSG_KEYS
+                    })
                 i += 1
 
             elif role == "tool":
@@ -128,7 +139,11 @@ class AnthropicProvider(BaseProvider):
                 converted.append({"role": "user", "content": tool_results})
 
             else:
-                converted.append({k: v for k, v in msg.items()})
+                # 默认分支(user 等):只保留 Anthropic 接受的字段
+                converted.append({
+                    k: v for k, v in msg.items()
+                    if k in AnthropicProvider._ANTHROPIC_MSG_KEYS
+                })
                 i += 1
 
         system = "\n\n".join(system_parts) if system_parts else None
@@ -214,48 +229,106 @@ class AnthropicProvider(BaseProvider):
         if tool_choice is not None:
             params["tool_choice"] = self._convert_tool_choice(tool_choice)
 
-        coro = self._client.messages.create(**params)
+        # 内部用 stream 拿完整 message,避开 Anthropic SDK 对长操作(>10 分钟,
+        # 含长 thinking / 大 cache write / 超大 max_tokens 场景)的硬要求:
+        #   "Streaming is required for operations that may take longer than 10 minutes"
+        #
+        # 用 messages.create(stream=True) 而不是 messages.stream() —— 后者是 SDK
+        # 高级上下文管理器,会偷偷加 extra_headers / beta features 等参数,某些
+        # OpenAI 兼容代理网关(如 openai-next 这种把 /v1/messages 转给 anthropic
+        # 的多协议网关)不认会返回 400。chat_stream() 已经用 stream=True 跑通的形态,
+        # chat() 复用同一形态最稳。
+        coro = self._client.messages.create(stream=True, **params)
         if timeout is not None:
-            resp = await asyncio.wait_for(coro, timeout=timeout)
+            stream = await asyncio.wait_for(coro, timeout=timeout)
         else:
-            resp = await coro
+            stream = await coro
 
+        # 消费 stream events 合并成 Message 同构形态(对外 ChatResponse 接口零变化)
         content = ""
         reasoning = ""
-        tool_calls = []
-        for block in resp.content:
-            if block.type == "thinking":
-                reasoning += block.thinking
-            elif block.type == "text":
-                content += block.text
-            elif block.type == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block.id,
-                    type="function",
-                    function=ToolCallFunction(
-                        name=block.name,
-                        arguments=json.dumps(block.input) if isinstance(block.input, dict) else str(block.input),
-                    ),
-                ))
+        # tool_calls 按 content_block index 累积:partial_json 边收边拼
+        # 每个 tool_use block 来一次 content_block_start(带 id+name) + 多次
+        # content_block_delta(partial_json),最后 content_block_stop
+        tool_calls_acc: dict[int, dict[str, Any]] = {}
+        current_tool_index: Optional[int] = None
+        stop_reason: Optional[str] = None
+        model_name: Optional[str] = None
+        input_tokens = 0
+        output_tokens = 0
+        cached_tokens = 0
 
-        usage = TokenUsage()
-        if resp.usage:
-            cached = getattr(resp.usage, "cache_read_input_tokens", 0) or 0
-            usage = TokenUsage(
-                prompt_tokens=resp.usage.input_tokens,
-                completion_tokens=resp.usage.output_tokens,
-                total_tokens=resp.usage.input_tokens + resp.usage.output_tokens,
-                cached_tokens=cached,
-            )
+        async for event in stream:
+            etype = event.type
+
+            if etype == "message_start":
+                msg = event.message
+                model_name = getattr(msg, "model", None)
+                if getattr(msg, "usage", None):
+                    input_tokens = msg.usage.input_tokens or 0
+                    cached_tokens = getattr(msg.usage, "cache_read_input_tokens", 0) or 0
+
+            elif etype == "content_block_start":
+                block = event.content_block
+                btype = getattr(block, "type", "")
+                if btype == "tool_use":
+                    current_tool_index = event.index
+                    tool_calls_acc[current_tool_index] = {
+                        "id": block.id,
+                        "name": block.name,
+                        "arguments": "",
+                    }
+                # text / thinking block 不需要 start 时初始化,delta 时累积即可
+
+            elif etype == "content_block_delta":
+                delta = event.delta
+                dtype = getattr(delta, "type", "")
+                if dtype == "text_delta":
+                    content += delta.text
+                elif dtype == "thinking_delta":
+                    reasoning += delta.thinking
+                elif dtype == "input_json_delta" and current_tool_index is not None:
+                    tool_calls_acc[current_tool_index]["arguments"] += delta.partial_json
+
+            elif etype == "content_block_stop":
+                current_tool_index = None
+
+            elif etype == "message_delta":
+                if getattr(event.delta, "stop_reason", None):
+                    stop_reason = event.delta.stop_reason
+                if getattr(event, "usage", None):
+                    output_tokens = event.usage.output_tokens or 0
+
+            # message_stop 不带数据,忽略
+
+        # 按 content_block index 顺序输出 tool_calls
+        tool_calls = []
+        for idx in sorted(tool_calls_acc.keys()):
+            tc = tool_calls_acc[idx]
+            tool_calls.append(ToolCall(
+                id=tc["id"],
+                type="function",
+                function=ToolCallFunction(
+                    name=tc["name"],
+                    arguments=tc["arguments"] or "{}",
+                ),
+            ))
+
+        usage = TokenUsage(
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            cached_tokens=cached_tokens,
+        )
 
         return ChatResponse(
             content=content,
             reasoning_content=reasoning,
-            model=resp.model,
-            finish_reason=self._FINISH_REASON_MAP.get(resp.stop_reason, resp.stop_reason or "stop"),
+            model=model_name or model,
+            finish_reason=self._FINISH_REASON_MAP.get(stop_reason, stop_reason or "stop"),
             usage=usage,
             tool_calls=tool_calls if tool_calls else None,
-            raw=resp,
+            raw=None,
         )
 
     async def chat_stream(
