@@ -10,6 +10,7 @@ Requires: ``pip install redis``
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -47,7 +48,12 @@ class RedisBackend(StateBackend):
 
         # SSL 由 URL scheme 决定（rediss:// = 启用），不再显式传 ssl kwarg
         # 避免 redis-py 5+ 的 AbstractConnection 不接受 ssl 参数。
-        self._redis = aioredis.from_url(url, decode_responses=True)
+        # socket_timeout 兜底：Redis 偶发抖动/负载峰值时，别让 await redis.get 无限等
+        # （默认 None = 无限等，实测单次卡 231s 拖死整条 LLM 调用链）
+        self._redis = aioredis.from_url(
+            url, decode_responses=True,
+            socket_timeout=5.0, socket_connect_timeout=5.0,
+        )
         self._prefix = key_prefix
         self._instance_id = str(uuid.uuid4())[:8]
 
@@ -58,7 +64,12 @@ class RedisBackend(StateBackend):
 
     async def get_score_card(self, model: str, provider: str) -> ScoreCard:
         key = self._key("scorecard", model, provider)
-        raw = await self._redis.get(key)
+        try:
+            raw = await asyncio.wait_for(self._redis.get(key), timeout=3.0)
+        except Exception:
+            # Redis 抖动/超时：返回默认评分卡，绝不让评分查询阻塞 LLM 主链路
+            logger.warning("get_score_card Redis 超时/失败，返回默认评分卡: %s", key)
+            return ScoreCard()
         if raw:
             return self._deserialize_score_card(raw)
         return ScoreCard()

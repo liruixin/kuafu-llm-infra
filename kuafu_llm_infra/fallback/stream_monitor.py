@@ -160,6 +160,9 @@ class StreamMonitor:
 
                 elapsed = time.monotonic() - start
                 content = chunk.content or ""
+                # 纯 tool_calls 帧（无思考、无文本、只有工具调用增量）不算空帧：
+                # 模型正在输出工具调用，content 空是正常现象，不能被 empty_frame 误判
+                strategy_content = content if content else ("[tool_calls]" if chunk.tool_calls else "")
 
                 # logger.info(
                 #     f"{log_prefix} "
@@ -179,7 +182,7 @@ class StreamMonitor:
                 # Run all strategies
                 for strategy in strategies:
                     event = strategy.on_chunk(
-                        content=content,
+                        content=strategy_content,
                         is_first=first_chunk,
                         elapsed=elapsed,
                         total_tokens=token_estimate,
@@ -206,7 +209,7 @@ class StreamMonitor:
                     wait_start = time.monotonic()
                     continue
 
-                content_buffer += content
+                content_buffer += strategy_content
                 yield chunk
                 # yield 返回后（调用方处理完毕），开始计时等待下一个 chunk
                 wait_start = time.monotonic()
