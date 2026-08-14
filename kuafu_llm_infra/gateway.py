@@ -122,6 +122,7 @@ class _StreamChunkWrapper:
         self.usage = chunk.usage
         self.raw = chunk.raw
         self.thinking = chunk.thinking  # True = 思考阶段帧，content 是 reasoning
+        self.reasoning_content = chunk.reasoning_content  # 完整思考内容（thinking 阶段累积）
 
 
 class _CompletionResponse:

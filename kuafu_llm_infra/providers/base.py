@@ -68,6 +68,7 @@ class StreamChunk:
     tool_calls: Optional[List[ToolCall]] = None  # Incremental tool call deltas
     raw: Any = None
     thinking: bool = False  # True when chunk is from model thinking phase (<think>)
+    reasoning_content: str = ""  # 完整思考内容（thinking 阶段累积，附加到 content chunk）
 
 
 # ============================================================================

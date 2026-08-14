@@ -35,18 +35,9 @@ class TtftTimeoutStrategy(BaseStrategy):
         chunk_arrived_at: Optional[float] = None,
         is_thinking: bool = False,
     ) -> Optional[StrategyEvent]:
-        if content:
-            self._first_token_received = True
-            return None
-
-        if not self._first_token_received and elapsed > self._threshold:
-            return StrategyEvent(
-                strategy=self.name,
-                action=StrategyAction.SWITCH,
-                provider=self._provider,
-                model=self._model,
-                detail={"ttft_threshold": self._threshold, "elapsed": elapsed},
-            )
+        # 任何 chunk（含 reasoning/thinking）到达即算"首 token 到达"——
+        # reasoning 深度推理长不该被误判成首 token 超时（服务端在正常思考，别切 provider）。
+        self._first_token_received = True
         return None
 
     def on_timeout(self, elapsed: float) -> Optional[StrategyEvent]:

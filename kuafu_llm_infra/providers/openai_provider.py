@@ -5,8 +5,12 @@ OpenAI SDK provider adapter.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
+import time
 from typing import Any, AsyncIterator, Dict, List, Optional
+
+logger = logging.getLogger("kuafu_llm_infra.openai")
 
 from openai import AsyncOpenAI
 
@@ -177,13 +181,19 @@ class OpenAIProvider(BaseProvider):
             params["tool_choice"] = tool_choice
 
         coro = self._client.chat.completions.create(**params)
+        _t_create = time.monotonic()
         if timeout is not None:
             stream = await asyncio.wait_for(coro, timeout=timeout)
         else:
             stream = await coro
+        logger.warning(
+            "chat_stream create 耗时: %.2fs (timeout=%s model=%s)",
+            time.monotonic() - _t_create, timeout, model,
+        )
 
         # 流式剥离 <think>...</think>：缓冲思考内容，不输出给调用方
         in_think = False
+        reasoning_buf = ""  # 累积完整思考内容，附加到后续 content chunk
 
         async for chunk in stream:
             usage = None
@@ -208,6 +218,8 @@ class OpenAIProvider(BaseProvider):
 
             # 处理 reasoning_content 字段（DeepSeek 等模型通过独立字段返回思考内容）
             reasoning = getattr(delta, "reasoning_content", None) or ""
+            if reasoning:
+                reasoning_buf += reasoning
             if not text and reasoning:
                 is_thinking_frame = True
             else:
@@ -266,6 +278,7 @@ class OpenAIProvider(BaseProvider):
                     tool_calls=delta_tool_calls,
                     raw=chunk,
                     thinking=is_thinking_frame,
+                    reasoning_content=reasoning_buf,
                 )
 
 

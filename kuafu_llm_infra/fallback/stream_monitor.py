@@ -80,6 +80,7 @@ class StreamMonitor:
         first_chunk = True
         ttft: Optional[float] = None
         content_buffer = ""
+        reasoning_buf = ""      # 累积思考内容（thinking 帧的 reasoning_content），附加到 content chunk
         final_usage: Optional[TokenUsage] = None
         model_wait_time = 0.0   # 累计等待 SDK 返回 chunk 的纯模型生成时间
 
@@ -206,9 +207,13 @@ class StreamMonitor:
 
                 # 思考帧不 yield 给调用方，不累计内容
                 if chunk.thinking:
+                    if chunk.reasoning_content:
+                        reasoning_buf = chunk.reasoning_content
                     wait_start = time.monotonic()
                     continue
 
+                if reasoning_buf:
+                    chunk.reasoning_content = reasoning_buf
                 content_buffer += strategy_content
                 yield chunk
                 # yield 返回后（调用方处理完毕），开始计时等待下一个 chunk
