@@ -72,7 +72,8 @@ kuafu_llm_infra/
 │   ├── base.py                     # Provider 抽象基类 + 统一响应类型
 │   ├── registry.py                 # @register_provider 注册表
 │   ├── openai_provider.py          # OpenAI SDK 适配器（自注册）
-│   └── anthropic_provider.py       # Anthropic SDK 适配器（自注册）
+│   ├── anthropic_provider.py       # Anthropic SDK 适配器（自注册）
+│   └── google_provider.py          # Google Gemini SDK 适配器（自注册）
 │
 ├── fallback/
 │   ├── engine.py                   # 降级编排引擎（纯编排逻辑）
@@ -144,6 +145,14 @@ llm_stability:
         anthropic:
           base_url: "https://api.ppinfra.com/anthropic/v1"
 
+    google-ai:
+      api_key: "${GEMINI_API_KEY}"
+      endpoints:
+        google:
+          # Gemini Developer API 使用 SDK 默认地址时可留空。
+          # 接入企业网关或代理时填写其 base URL。
+          base_url: ""
+
   # 模型定义（模型为第一公民）
   models:
     claude-opus-4-5-20251101:
@@ -165,6 +174,13 @@ llm_stability:
           priority: 1
           probe: true
 
+    gemini-2.5-flash:
+      providers:
+        - provider: google-ai
+          endpoint: google
+          priority: 1
+          probe: true
+
   # 业务场景策略
   strategies:
     requirement_clarify:
@@ -179,6 +195,12 @@ llm_stability:
 
     code_generation:
       primary: gpt-4.1-2025-04-14
+      timeout:
+        per_request: 60
+        total: 120
+
+    fast_summary:
+      primary: gemini-2.5-flash
       timeout:
         per_request: 60
         total: 120
