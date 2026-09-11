@@ -42,6 +42,21 @@ class GoogleProvider(BaseProvider):
         base_url: Optional[str] = None,
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> None:
+        # AgentWorld's existing UI exposes ``google`` but not ``vertexai``.
+        # Treat the Vertex API host as an explicit compatibility marker.  It
+        # must *not* be forwarded as SDK base_url: Vertex Express uses the
+        # SDK's global publishers/google route when authenticated by API key.
+        if "aiplatform.googleapis.com" in (base_url or ""):
+            http_options: Dict[str, Any] = {"api_version": "v1"}
+            if extra_headers:
+                http_options["headers"] = extra_headers
+            self._client = genai.Client(
+                vertexai=True,
+                api_key=api_key,
+                http_options=types.HttpOptions(**http_options),
+            )
+            return
+
         # ``google-genai`` transports endpoint overrides and request headers
         # through HttpOptions (rather than Client's top-level constructor).
         # Keeping this conditional preserves the SDK defaults for the normal
@@ -462,8 +477,60 @@ class GoogleProvider(BaseProvider):
                         raw=chunk,
                     )
 
+
+class VertexAIProvider(GoogleProvider):
+    """Vertex AI Gemini adapter using the official Google Gen AI SDK.
+
+    Standard Vertex deployments authenticate with Application Default
+    Credentials (ADC). Vertex AI Express may instead supply an API key.
+    """
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> None:
+        import os
+
+        client_params: Dict[str, Any] = {"vertexai": True}
+        if api_key:
+            client_params["api_key"] = api_key
+
+        # Vertex Express API keys use the global endpoint and do not need a
+        # project/location. Standard Vertex uses ADC plus these variables.
+        if not api_key:
+            project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+            location = os.environ.get("GOOGLE_CLOUD_LOCATION")
+            if project:
+                client_params["project"] = project
+            if location:
+                client_params["location"] = location
+
+        # Vertex uses the stable API. The SDK determines its regional endpoint
+        # from project/location; base_url is only for an approved custom proxy.
+        http_options: Dict[str, Any] = {"api_version": "v1"}
+        if base_url:
+            http_options["base_url"] = base_url
+        if extra_headers:
+            http_options["headers"] = extra_headers
+        client_params["http_options"] = types.HttpOptions(**http_options)
+        self._client = genai.Client(**client_params)
+
+    @property
+    def provider_type(self) -> str:
+        return "vertexai"
+
+
 @register_provider("google")
 def _create_google(
     api_key: str, base_url: str, extra_headers: dict | None = None,
 ) -> GoogleProvider:
     return GoogleProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)
+
+
+@register_provider("vertexai")
+def _create_vertexai(
+    api_key: str, base_url: str, extra_headers: dict | None = None,
+) -> VertexAIProvider:
+    return VertexAIProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)
