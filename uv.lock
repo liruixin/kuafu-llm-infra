@@ -555,8 +555,8 @@ wheels = [
 ]
 
 [[package]]
-name = "kuafu-llm-sdk"
-version = "0.3.0"
+name = "llm-provider-sdk"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

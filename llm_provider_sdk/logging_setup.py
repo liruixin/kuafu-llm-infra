@@ -18,7 +18,7 @@ class _TraceIdFilter(logging.Filter):
         return True
 
 
-def setup_logging(log_dir: str = "kuafu-llm-infra-log", *, file_level: int = logging.DEBUG,
+def setup_logging(log_dir: str = "llm-provider-sdk-log", *, file_level: int = logging.DEBUG,
                   max_bytes: int = 50 * 1024 * 1024, backup_count: int = 5) -> None:
     """重复调用安全，首次生效。"""
     global _INITIALIZED
@@ -36,7 +36,7 @@ def setup_logging(log_dir: str = "kuafu-llm-infra-log", *, file_level: int = log
         handler.addFilter(_TraceIdFilter())
         return handler
 
-    lib_logger = logging.getLogger("kuafu_llm_infra")
+    lib_logger = logging.getLogger("llm_provider_sdk")
     lib_logger.setLevel(file_level)
     lib_logger.propagate = False
     lib_logger.addHandler(file_handler("infra.log"))

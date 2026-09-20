@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from kuafu_llm_infra.providers.anthropic_provider import AnthropicProvider
-from kuafu_llm_infra.providers.google_provider import GoogleProvider
-from kuafu_llm_infra.providers.openai_provider import _split_think_tag
-from kuafu_llm_infra.providers.openai_responses_provider import OpenAIResponsesProvider
+from llm_provider_sdk.providers.anthropic_provider import AnthropicProvider
+from llm_provider_sdk.providers.google_provider import GoogleProvider
+from llm_provider_sdk.providers.openai_provider import _split_think_tag
+from llm_provider_sdk.providers.openai_responses_provider import OpenAIResponsesProvider
 
 MESSAGES = [
     {"role": "system", "content": "be brief"},

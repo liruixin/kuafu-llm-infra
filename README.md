@@ -1,4 +1,4 @@
-# kuafu-llm-infra
+# llm-provider-sdk
 
 OpenAI 兼容的统一 LLM 调用入口，内部按配置做多提供商降级。
 
@@ -8,13 +8,13 @@ OpenAI 兼容的统一 LLM 调用入口，内部按配置做多提供商降级�
 ## 安装
 
 ```bash
-pip install kuafu-llm-sdk
+pip install llm-provider-sdk
 ```
 
 ## 使用
 
 ```python
-from kuafu_llm_infra import create_client
+from llm_provider_sdk import create_client
 
 client = create_client("llm_stability.yaml")                 # 本地配置
 client = create_client(redis_url="redis://host:6379/0")       # 从 Redis 读配置，后台每 10s 拉取
@@ -44,7 +44,7 @@ await client.push_config(new_config_dict)
 await client.shutdown()
 ```
 
-调用失败抛 `kuafu_llm_infra.AllProvidersExhausted`，消息里带每个提供商的失败原因。
+调用失败抛 `llm_provider_sdk.AllProvidersExhausted`，消息里带每个提供商的失败原因。
 
 ## 配置
 
@@ -111,7 +111,7 @@ grep <trace_id> logs/*.log
 ## 日志
 
 ```python
-from kuafu_llm_infra import setup_logging
+from llm_provider_sdk import setup_logging
 setup_logging(log_dir="logs")   # infra.log = 库日志，third-party.log = SDK/HTTP 库日志
 ```
 

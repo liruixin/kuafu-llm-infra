@@ -7,11 +7,11 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from kuafu_llm_infra.config.schema import LLMStabilityConfig
-from kuafu_llm_infra.engine import AllProvidersExhausted, FallbackEngine
-from kuafu_llm_infra.pool import ModelPool
-from kuafu_llm_infra.providers.base import BaseProvider, StreamChunk, ToolCall, ToolCallFunction
-from kuafu_llm_infra.types import RequestContext, TokenUsage
+from llm_provider_sdk.config.schema import LLMStabilityConfig
+from llm_provider_sdk.engine import AllProvidersExhausted, FallbackEngine
+from llm_provider_sdk.pool import ModelPool
+from llm_provider_sdk.providers.base import BaseProvider, StreamChunk, ToolCall, ToolCallFunction
+from llm_provider_sdk.types import RequestContext, TokenUsage
 
 
 class FakeProvider(BaseProvider):

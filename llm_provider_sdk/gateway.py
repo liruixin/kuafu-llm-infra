@@ -25,7 +25,7 @@ from .providers import create_provider
 from .providers.base import BaseProvider, ChatResponse, StreamChunk, ToolCall
 from .types import RequestContext, trace_id_var
 
-logger = logging.getLogger("kuafu_llm_infra.gateway")
+logger = logging.getLogger("llm_provider_sdk.gateway")
 
 
 # ============================================================================

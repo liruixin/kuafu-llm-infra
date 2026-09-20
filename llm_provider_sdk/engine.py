@@ -12,7 +12,7 @@ from .pool import ModelPool, ModelStats
 from .providers.base import BaseProvider, ChatResponse, StreamChunk, aggregate_chunks
 from .types import RequestContext, trace_id_var
 
-logger = logging.getLogger("kuafu_llm_infra.engine")
+logger = logging.getLogger("llm_provider_sdk.engine")
 
 
 class AllProvidersExhausted(Exception):
