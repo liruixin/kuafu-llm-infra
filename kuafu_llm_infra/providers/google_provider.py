@@ -1,333 +1,83 @@
-"""
-Google Gemini SDK provider adapter.
-
-使用 google-genai SDK 调用 Gemini 模型。
-"""
+"""Google Gemini 协议适配器（google-genai SDK）。"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
-import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from google import genai
 from google.genai import types
 
 from ..types import TokenUsage
-from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall, ToolCallFunction
-from .registry import register_provider
+from .base import BaseProvider, StreamChunk, ToolCall, ToolCallFunction
 
-logger = logging.getLogger("kuafu_llm_infra.providers.google")
-
-# finish_reason 映射
-_FINISH_REASON_MAP = {
-    "STOP": "stop",
-    "MAX_TOKENS": "length",
-    "SAFETY": "content_filter",
-}
+_FINISH_REASON = {"STOP": "stop", "MAX_TOKENS": "length", "SAFETY": "content_filter"}
+_TOOL_MODE = {"auto": "AUTO", "none": "NONE", "required": "ANY"}
 
 
 class GoogleProvider(BaseProvider):
-    """Google Gemini provider adapter."""
 
-    def __init__(
-        self,
-        api_key: str,
-        base_url: Optional[str] = None,
-        extra_headers: Optional[Dict[str, str]] = None,
-    ) -> None:
+    def __init__(self, api_key: str, base_url: Optional[str] = None,
+                 extra_headers: Optional[Dict[str, str]] = None) -> None:
+        super().__init__(api_key, base_url, extra_headers)
         self._client = genai.Client(api_key=api_key)
 
-    @property
-    def provider_type(self) -> str:
-        return "google"
-
-    # ------------------------------------------------------------------
-    # Probe
-    # ------------------------------------------------------------------
-
-    async def probe(
-        self,
-        model: str,
-        *,
-        max_tokens: int = 5,
-        timeout: float = 10.0,
-    ) -> AsyncIterator[StreamChunk]:
-        """Gemini 探测：最小化流式请求。"""
-        config = types.GenerateContentConfig(max_output_tokens=max_tokens)
-        contents = [types.Content(
-            role="user",
-            parts=[types.Part(text="hi")],
-        )]
-
-        coro = self._client.aio.models.generate_content_stream(
-            model=model, contents=contents, config=config,
-        )
-        stream = await asyncio.wait_for(coro, timeout=timeout)
-
-        async for chunk in stream:
-            if not chunk.candidates:
-                continue
-            candidate = chunk.candidates[0]
-            if not candidate.content or not candidate.content.parts:
-                continue
-            for part in candidate.content.parts:
-                if part.text:
-                    yield StreamChunk(content=part.text, raw=chunk)
-
-    # ------------------------------------------------------------------
-    # 消息格式转换
-    # ------------------------------------------------------------------
-
     @staticmethod
-    def _convert_messages(
-        messages: List[Dict[str, Any]],
-    ) -> tuple[Optional[str], List[types.Content]]:
-        """将 OpenAI 格式消息转换为 Gemini 格式。
-
-        返回 (system_instruction, contents)。
-        tool 角色的连续消息合并为一条 user Content（Gemini 规范）。
-        """
-        system_parts: List[str] = []
+    def _convert_messages(messages: List[Dict[str, Any]]) -> tuple[Optional[str], List[types.Content]]:
+        """chat messages → (system_instruction, contents)。"""
+        # tool 消息只带 tool_call_id，Gemini 要求带函数名，先建映射
+        call_id_to_name = {
+            tc.get("id"): tc.get("function", {}).get("name", "")
+            for msg in messages if msg.get("role") == "assistant"
+            for tc in msg.get("tool_calls") or []
+        }
+        system: List[str] = []
         contents: List[types.Content] = []
-
-        # 先构建 tool_call_id → function_name 映射
-        id_to_name: Dict[str, str] = {}
         for msg in messages:
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                for tc in msg["tool_calls"]:
-                    func = tc.get("function", {})
-                    tc_id = tc.get("id", "")
-                    name = func.get("name", "")
-                    if tc_id and name:
-                        id_to_name[tc_id] = name
-
-        i = 0
-        while i < len(messages):
-            msg = messages[i]
-            role = msg.get("role", "")
-
+            role = msg.get("role")
             if role == "system":
-                system_parts.append(msg.get("content", ""))
-                i += 1
-
+                system.append(msg.get("content") or "")
             elif role == "user":
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(text=msg.get("content", ""))],
-                ))
-                i += 1
-
+                contents.append(types.Content(role="user", parts=[types.Part(text=msg.get("content") or "")]))
             elif role == "assistant":
                 parts: List[types.Part] = []
-                content = msg.get("content")
-                if content:
-                    parts.append(types.Part(text=content))
-
-                for tc in msg.get("tool_calls", []):
+                if msg.get("content"):
+                    parts.append(types.Part(text=msg["content"]))
+                for tc in msg.get("tool_calls") or []:
                     func = tc.get("function", {})
-                    args_str = func.get("arguments", "{}")
-                    try:
-                        args = json.loads(args_str)
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                    part_kwargs: Dict[str, Any] = {
-                        "function_call": types.FunctionCall(
-                            id=tc.get("id", ""),
-                            name=func.get("name", ""),
-                            args=args,
+                    parts.append(types.Part(
+                        function_call=types.FunctionCall(
+                            id=tc.get("id", ""), name=func.get("name", ""), args=_parse_json(func.get("arguments")),
                         ),
-                    }
-                    # Gemini 3 / 2.5 thinking 模型要求回传 thought_signature，
-                    # 业务侧把上一轮拿到的 signature 放在 tool_call dict 顶层即可。
-                    sig = tc.get("thought_signature")
-                    if sig is not None:
-                        part_kwargs["thought_signature"] = sig
-                    parts.append(types.Part(**part_kwargs))
-
+                        # Gemini thinking 模型要求回传上一轮的 thought_signature
+                        thought_signature=tc.get("thought_signature"),
+                    ))
                 if parts:
                     contents.append(types.Content(role="model", parts=parts))
-                i += 1
-
             elif role == "tool":
-                # 连续 tool 消息合并为一条 user Content
-                tool_parts: List[types.Part] = []
-                while i < len(messages) and messages[i].get("role") == "tool":
-                    t = messages[i]
-                    tc_id = t.get("tool_call_id", "")
-                    func_name = id_to_name.get(tc_id, "unknown")
-                    raw_content = t.get("content", "")
-                    try:
-                        response_body = json.loads(raw_content)
-                        if not isinstance(response_body, dict):
-                            response_body = {"result": response_body}
-                    except (json.JSONDecodeError, TypeError):
-                        response_body = {"result": raw_content}
-
-                    tool_parts.append(types.Part(
-                        function_response=types.FunctionResponse(
-                            id=tc_id,
-                            name=func_name,
-                            response=response_body,
-                        ),
-                    ))
-                    i += 1
-
-                contents.append(types.Content(role="user", parts=tool_parts))
-
-            else:
-                i += 1
-
-        system = "\n\n".join(system_parts) if system_parts else None
-        return system, contents
+                call_id = msg.get("tool_call_id", "")
+                result = _parse_json(msg.get("content"), wrap=True)
+                part = types.Part(function_response=types.FunctionResponse(
+                    id=call_id, name=call_id_to_name.get(call_id, "unknown"), response=result,
+                ))
+                # 连续的 tool 消息合并进同一条 user Content
+                if contents and contents[-1].role == "user" and contents[-1].parts[0].function_response:
+                    contents[-1].parts.append(part)
+                else:
+                    contents.append(types.Content(role="user", parts=[part]))
+        return ("\n\n".join(system) or None), contents
 
     @staticmethod
-    def _convert_tools(
-        tools: List[Dict[str, Any]],
-    ) -> List[types.Tool]:
-        """OpenAI 格式工具 → Gemini 格式。
-
-        OpenAI: {"type": "function", "function": {"name": ..., "parameters": ...}}
-        Gemini: types.FunctionDeclaration(name=..., parameters=...)
-        """
-        declarations = []
-        for tool in tools:
-            func = tool.get("function", {})
-            declarations.append(types.FunctionDeclaration(
-                name=func.get("name", ""),
-                description=func.get("description", ""),
-                parameters=func.get("parameters", {}),
-            ))
-        return [types.Tool(function_declarations=declarations)]
-
-    @staticmethod
-    def _convert_tool_choice(tool_choice: str) -> types.ToolConfig:
-        """Convert OpenAI-format tool_choice to Gemini ToolConfig.
-
-        OpenAI -> Gemini mapping:
-        - ``"auto"`` -> ``AUTO``
-        - ``"none"`` -> ``NONE``
-        - ``"required"`` -> ``ANY``
-        """
-        mode_map = {
-            "auto": "AUTO",
-            "none": "NONE",
-            "required": "ANY",
-        }
-        mode = mode_map.get(tool_choice, "AUTO")
-        return types.ToolConfig(
-            function_calling_config=types.FunctionCallingConfig(mode=mode),
-        )
-
-    @staticmethod
-    def _extract_usage(usage_meta) -> TokenUsage:
-        """从 usage_metadata 提取 TokenUsage。"""
-        if not usage_meta:
-            return TokenUsage()
-        prompt = getattr(usage_meta, "prompt_token_count", 0) or 0
-        completion = getattr(usage_meta, "candidates_token_count", 0) or 0
-        total = getattr(usage_meta, "total_token_count", 0) or 0
-        cached = getattr(usage_meta, "cached_content_token_count", 0) or 0
+    def _extract_usage(meta: Any) -> Optional[TokenUsage]:
+        if not meta or not meta.total_token_count:
+            return None
         return TokenUsage(
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            total_tokens=total,
-            cached_tokens=cached,
+            prompt_tokens=meta.prompt_token_count or 0,
+            completion_tokens=meta.candidates_token_count or 0,
+            total_tokens=meta.total_token_count or 0,
+            cached_tokens=meta.cached_content_token_count or 0,
         )
-
-    @staticmethod
-    def _map_finish_reason(candidate) -> str:
-        """将 Gemini finish_reason 映射为标准字符串。"""
-        fr = getattr(candidate, "finish_reason", None)
-        if fr is None:
-            return "stop"
-        fr_str = str(fr).split(".")[-1]
-        return _FINISH_REASON_MAP.get(fr_str, "stop")
-
-    # ------------------------------------------------------------------
-    # 非流式
-    # ------------------------------------------------------------------
-
-    async def chat(
-        self,
-        model: str,
-        messages: List[Dict[str, Any]],
-        *,
-        max_tokens: int = 4096,
-        temperature: Optional[float] = None,
-        timeout: Optional[float] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
-        system, contents = self._convert_messages(messages)
-
-        config_params: Dict[str, Any] = {"max_output_tokens": max_tokens}
-        if system is not None:
-            config_params["system_instruction"] = system
-        if temperature is not None:
-            config_params["temperature"] = temperature
-        if tools is not None:
-            config_params["tools"] = self._convert_tools(tools)
-        if tool_choice is not None:
-            config_params["tool_config"] = self._convert_tool_choice(tool_choice)
-        config = types.GenerateContentConfig(**config_params)
-
-        coro = self._client.aio.models.generate_content(
-            model=model, contents=contents, config=config,
-        )
-        if timeout is not None:
-            resp = await asyncio.wait_for(coro, timeout=timeout)
-        else:
-            resp = await coro
-
-        if not resp.candidates:
-            raise ValueError("Gemini returned empty candidate list")
-
-        candidate = resp.candidates[0]
-        content = ""
-        reasoning = ""
-        tool_calls: List[ToolCall] = []
-
-        if candidate.content and candidate.content.parts:
-            for part in candidate.content.parts:
-                if part.text:
-                    if getattr(part, "thought", False):
-                        reasoning += part.text
-                    else:
-                        content += part.text
-                if part.function_call:
-                    fc = part.function_call
-                    tool_calls.append(ToolCall(
-                        id=getattr(fc, "id", None) or str(uuid.uuid4()),
-                        type="function",
-                        function=ToolCallFunction(
-                            name=fc.name,
-                            arguments=json.dumps(
-                                dict(fc.args) if fc.args else {},
-                            ),
-                        ),
-                        thought_signature=getattr(part, "thought_signature", None),
-                    ))
-
-        usage = self._extract_usage(resp.usage_metadata)
-        finish_reason = self._map_finish_reason(candidate)
-
-        return ChatResponse(
-            content=content,
-            reasoning_content=reasoning,
-            model=model,
-            finish_reason=finish_reason,
-            usage=usage,
-            tool_calls=tool_calls if tool_calls else None,
-            raw=resp,
-        )
-
-    # ------------------------------------------------------------------
-    # 流式
-    # ------------------------------------------------------------------
 
     async def chat_stream(
         self,
@@ -336,84 +86,73 @@ class GoogleProvider(BaseProvider):
         *,
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
-        timeout: Optional[float] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         system, contents = self._convert_messages(messages)
-
-        config_params: Dict[str, Any] = {"max_output_tokens": max_tokens}
-        if system is not None:
-            config_params["system_instruction"] = system
+        config: Dict[str, Any] = {"max_output_tokens": max_tokens, **kwargs}
+        if system:
+            config["system_instruction"] = system
         if temperature is not None:
-            config_params["temperature"] = temperature
+            config["temperature"] = temperature
         if tools is not None:
-            config_params["tools"] = self._convert_tools(tools)
+            config["tools"] = [types.Tool(function_declarations=[
+                types.FunctionDeclaration(
+                    name=t["function"].get("name", ""),
+                    description=t["function"].get("description", ""),
+                    parameters=t["function"].get("parameters", {}),
+                ) for t in tools
+            ])]
         if tool_choice is not None:
-            config_params["tool_config"] = self._convert_tool_choice(tool_choice)
-        config = types.GenerateContentConfig(**config_params)
+            config["tool_config"] = types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode=_TOOL_MODE.get(tool_choice, "AUTO")),
+            )
 
-        coro = self._client.aio.models.generate_content_stream(
-            model=model, contents=contents, config=config,
+        stream = await self._client.aio.models.generate_content_stream(
+            model=model, contents=contents, config=types.GenerateContentConfig(**config),
         )
-        if timeout is not None:
-            stream = await asyncio.wait_for(coro, timeout=timeout)
-        else:
-            stream = await coro
+
+        reasoning = ""
+        tool_index = -1
 
         async for chunk in stream:
-            if not chunk.candidates:
-                # 最后一个 chunk 可能只有 usage_metadata
-                if chunk.usage_metadata:
-                    yield StreamChunk(
-                        content="",
-                        usage=self._extract_usage(chunk.usage_metadata),
-                        raw=chunk,
-                    )
+            usage = self._extract_usage(chunk.usage_metadata)
+            candidate = chunk.candidates[0] if chunk.candidates else None
+            if candidate is None:
+                if usage:
+                    yield StreamChunk(usage=usage, raw=chunk)
                 continue
 
-            candidate = chunk.candidates[0]
-            if not candidate.content or not candidate.content.parts:
-                continue
-
-            for part in candidate.content.parts:
-                if part.text:
-                    yield StreamChunk(content=part.text, raw=chunk)
-
+            for part in (candidate.content.parts if candidate.content else None) or []:
+                if part.text and part.thought:
+                    reasoning += part.text
+                    yield StreamChunk(content=part.text, thinking=True, raw=chunk, reasoning_content=reasoning)
+                elif part.text:
+                    yield StreamChunk(content=part.text, raw=chunk, reasoning_content=reasoning)
                 if part.function_call:
+                    tool_index += 1
                     fc = part.function_call
-                    tc_id = getattr(fc, "id", None) or str(uuid.uuid4())
-                    yield StreamChunk(
-                        content="",
-                        tool_calls=[ToolCall(
-                            id=tc_id,
-                            type="function",
-                            function=ToolCallFunction(
-                                name=fc.name,
-                                arguments=json.dumps(
-                                    dict(fc.args) if fc.args else {},
-                                ),
-                            ),
-                            thought_signature=getattr(part, "thought_signature", None),
-                        )],
-                        raw=chunk,
-                    )
+                    yield StreamChunk(raw=chunk, tool_calls=[ToolCall(
+                        id=fc.id or str(uuid.uuid4()), index=tool_index,
+                        function=ToolCallFunction(name=fc.name, arguments=json.dumps(dict(fc.args or {}))),
+                        thought_signature=part.thought_signature,
+                    )])
 
-            # finish_reason + usage
             if candidate.finish_reason:
-                finish = self._map_finish_reason(candidate)
-                usage = self._extract_usage(chunk.usage_metadata)
+                reason = str(candidate.finish_reason).split(".")[-1]
                 yield StreamChunk(
-                    content="",
-                    finish_reason=finish,
-                    usage=usage if usage.total_tokens > 0 else None,
-                    raw=chunk,
+                    finish_reason="tool_calls" if tool_index >= 0 else _FINISH_REASON.get(reason, "stop"),
+                    usage=usage, raw=chunk, reasoning_content=reasoning,
                 )
 
 
-@register_provider("google")
-def _create_google(
-    api_key: str, base_url: str, extra_headers: dict | None = None,
-) -> GoogleProvider:
-    return GoogleProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)
+def _parse_json(text: Any, wrap: bool = False) -> Dict[str, Any]:
+    """解析 JSON 字符串；wrap=True 时非 dict 结果包成 {"result": ...}。"""
+    try:
+        value = json.loads(text or "{}")
+    except (json.JSONDecodeError, TypeError):
+        value = text
+    if isinstance(value, dict):
+        return value
+    return {"result": value} if wrap else {}

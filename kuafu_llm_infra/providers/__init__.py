@@ -1,26 +1,31 @@
-"""
-Providers - LLM SDK adapters.
+"""Provider 适配器：把四种协议统一成 BaseProvider 接口。"""
 
-Wraps OpenAI, Anthropic, and other LLM SDKs behind a
-unified async interface. Provider types are self-registered
-via the ``@register_provider`` decorator.
-"""
+from typing import Dict, Optional, Type
 
-from .base import BaseProvider, ChatMessage, ChatResponse, StreamChunk
-from .registry import create_provider, register_provider, registered_types
+from .base import BaseProvider, ChatResponse, StreamChunk, ToolCall, ToolCallFunction
+from .openai_provider import OpenAIProvider
+from .openai_responses_provider import OpenAIResponsesProvider
+from .anthropic_provider import AnthropicProvider
+from .google_provider import GoogleProvider
 
-# Import provider modules to trigger self-registration.
-# Each module's @register_provider decorator runs at import time.
-from . import openai_provider as _openai  # noqa: F401
-from . import anthropic_provider as _anthropic  # noqa: F401
-from . import google_provider as _google  # noqa: F401
+# endpoint 类型名（YAML 里 endpoints 的 key）→ 适配器类
+PROVIDER_CLASSES: Dict[str, Type[BaseProvider]] = {
+    "openai": OpenAIProvider,
+    "openai_responses": OpenAIResponsesProvider,
+    "anthropic": AnthropicProvider,
+    "google": GoogleProvider,
+}
+
+
+def create_provider(provider_type: str, api_key: str, base_url: str,
+                    extra_headers: Optional[Dict[str, str]] = None) -> BaseProvider:
+    cls = PROVIDER_CLASSES.get(provider_type)
+    if cls is None:
+        raise ValueError(f"未知的 endpoint 类型 '{provider_type}'，可用: {sorted(PROVIDER_CLASSES)}")
+    return cls(api_key=api_key, base_url=base_url, extra_headers=extra_headers)
+
 
 __all__ = [
-    "BaseProvider",
-    "ChatMessage",
-    "ChatResponse",
-    "StreamChunk",
-    "create_provider",
-    "register_provider",
-    "registered_types",
+    "BaseProvider", "ChatResponse", "StreamChunk", "ToolCall", "ToolCallFunction",
+    "PROVIDER_CLASSES", "create_provider",
 ]

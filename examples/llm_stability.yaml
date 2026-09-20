@@ -1,10 +1,9 @@
-# Example configuration for kuafu-llm-infra
-# Copy this file and modify for your environment.
+# kuafu-llm-infra 示例配置
 
 llm_stability:
 
-  # === Provider credentials ===
-  # Each provider can expose multiple protocol endpoints (openai, anthropic, etc.)
+  # === 提供商凭证 ===
+  # 一个提供商可暴露多个协议端点：openai / openai_responses / anthropic / google
   providers:
     openai-next:
       api_key: "sk-xxx"
@@ -28,123 +27,63 @@ llm_stability:
         openai:
           base_url: "https://ark.cn-beijing.volces.com/api/v3"
 
-  # === Model definitions (model is the first-class citizen) ===
-  # Key = official/canonical model ID
-  # Each provider entry specifies the endpoint type and actual model_id.
-  # If model_id is omitted, it defaults to the key.
+  # === 模型定义 ===
+  # key = 模型名；每个提供商条目指定 endpoint 类型和实际 model_id（省略则同 key）
   models:
     claude-opus-4-5-20251101:
       providers:
         - provider: openai-next
           endpoint: openai
-          priority: 1
-          probe: true
           model_id: "claude-opus-4-5-20251101"
-        - provider: ppio
-          endpoint: anthropic
-          model_id: "claude-opus-4-5-20251101"
-          priority: 2
-          probe: true
 
     gpt-4.1-2025-04-14:
       providers:
         - provider: openai-next
           endpoint: openai
-          priority: 1
-          probe: true
-        - provider: ppio
-          endpoint: openai
-          priority: 2
-          probe: true
 
     deepseek-v3-2-251201:
       providers:
         - provider: volces
           endpoint: openai
-          priority: 1
-          probe: true
         - provider: ppio
           endpoint: openai
           model_id: "deepseek-chat"      # ppio uses "deepseek-chat"
-          priority: 2
-          probe: true
 
-  # === Business key strategies ===
-  # primary / fallback reference canonical model IDs (keys in models)
-
-  #todo 手动指定权重
-  #todo 固定的 fallback
-  #todo cache token nums
-  #todo 指定分数下不及格
-  #
+  # === 业务策略 ===
+  # business_key → 一个降级池。每次请求按权重和实时表现抽一个模型，失败或首 token 太慢就换池子里下一个。
+  # weight 越大越想命中；first_token 超过就换下一个；fast_first_token 以内算满分。
   strategies:
-    # Requirement clarification — streaming, user-facing
     requirement_clarify:
-      primary: claude-opus-4-5-20251101
-      fallback:
-        - gpt-4.1-2025-04-14
-        - deepseek-v3-2-251201
+      pool:
+        - model: claude-opus-4-5-20251101
+          weight: 10
+        - model: gpt-4.1-2025-04-14
+          weight: 3
+        - model: deepseek-v3-2-251201
+          weight: 1
       timeout:
-        ttft: 8
-        chunk_gap: 15
         per_request: 120
-        total: 180
-      empty_frame_threshold: 5
-      slow_speed_threshold: 5.0
+        first_token: 10
+        fast_first_token: 2
 
-    # Code generation — non-streaming, internal
     code_generation:
-      primary: deepseek-v3-2-251201
-      fallback:
-        - gpt-4.1-2025-04-14
+      pool:
+        - model: deepseek-v3-2-251201
+          weight: 10
+        - model: gpt-4.1-2025-04-14
+          weight: 1
       timeout:
         per_request: 60
-        total: 120
+        first_token: 10
+        fast_first_token: 2
 
-    # Chat — streaming, general purpose
     chat:
-      primary: gpt-4.1-2025-04-14
-      fallback:
-        - deepseek-v3-2-251201
+      pool:
+        - model: gpt-4.1-2025-04-14
+          weight: 10
+        - model: deepseek-v3-2-251201
+          weight: 1
       timeout:
-        ttft: 6
-        chunk_gap: 10
         per_request: 60
-        total: 90
-
-  # === Health check & probing ===
-  health_check:
-    interval: 20
-    failure_threshold: 3
-    recovery_threshold: 3
-    timeout: 10
-    probe_max_tokens: 5
-    stagger_interval: 2
-    cooldown: 60
-
-  # === Metrics ===
-  metrics:
-    enabled: true
-    backend: simple           # "simple" (in-memory) | "prometheus"
-    label_keys:               # Custom label names for request-level metrics
-      - user_id
-      - module
-      # - env
-
-  # === Alerting ===
-  alert:
-    channels:
-      - type: log
-      # - type: feishu
-      #   webhook_url: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-      # - type: webhook
-      #   url: "https://your-webhook.com/alert"
-    rules:
-      silence_seconds: 60
-
-  # === State backend ===
-  state_backend:
-    type: memory              # "memory" (default) | "redis"
-    # redis:
-    #   url: "redis://localhost:6379/0"
-    #   key_prefix: "llm_infra:"
+        first_token: 10
+        fast_first_token: 2

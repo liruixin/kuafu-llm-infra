@@ -33,5 +33,3 @@ htmlcov/
 *.env
 env.yaml
 
-# uv (not used)
-uv.lock

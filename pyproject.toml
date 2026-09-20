@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kuafu-llm-sdk"
-version = "0.1.0"
-description = "LLM infrastructure layer with multi-provider fallback, health monitoring, speed probing, and alerting."
+version = "0.3.0"
+description = "OpenAI-compatible LLM client with multi-provider fallback."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [
     {name = "KuafuAI", email = "dev@kuafuai.com"},
 ]
-keywords = ["llm", "fallback", "monitoring", "openai", "anthropic", "infrastructure"]
+keywords = ["llm", "fallback", "openai", "anthropic", "google"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -30,7 +30,6 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0",
     "google-genai>=1.0",
-    "prometheus-client>=0.20",
     "redis>=5.0",
 ]
 
