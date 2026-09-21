@@ -473,13 +473,18 @@ class LLMClient:
         api_key: str,
         base_url: str,
     ) -> Optional[BaseProvider]:
-        if not base_url:
+        # Native Google SDK clients resolve their official endpoint internally.
+        # Unlike OpenAI/Anthropic they must not require a configured base_url.
+        native_google_types = {"google", "vertexai"}
+        if not base_url and provider_type not in native_google_types:
             return None
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
+        headers = None
+        if provider_type not in native_google_types:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
 
         return create_provider(
             provider_type,

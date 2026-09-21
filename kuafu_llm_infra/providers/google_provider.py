@@ -26,6 +26,10 @@ _FINISH_REASON_MAP = {
     "STOP": "stop",
     "MAX_TOKENS": "length",
     "SAFETY": "content_filter",
+    "RECITATION": "content_filter",
+    "BLOCKLIST": "content_filter",
+    "PROHIBITED_CONTENT": "content_filter",
+    "MALFORMED_FUNCTION_CALL": "tool_calls",
 }
 
 
@@ -38,7 +42,36 @@ class GoogleProvider(BaseProvider):
         base_url: Optional[str] = None,
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> None:
-        self._client = genai.Client(api_key=api_key)
+        # AgentWorld's existing UI exposes ``google`` but not ``vertexai``.
+        # Treat the Vertex API host as an explicit compatibility marker.  It
+        # must *not* be forwarded as SDK base_url: Vertex Express uses the
+        # SDK's global publishers/google route when authenticated by API key.
+        if "aiplatform.googleapis.com" in (base_url or ""):
+            http_options: Dict[str, Any] = {"api_version": "v1"}
+            if extra_headers:
+                http_options["headers"] = extra_headers
+            self._client = genai.Client(
+                vertexai=True,
+                api_key=api_key,
+                http_options=types.HttpOptions(**http_options),
+            )
+            return
+
+        # ``google-genai`` transports endpoint overrides and request headers
+        # through HttpOptions (rather than Client's top-level constructor).
+        # Keeping this conditional preserves the SDK defaults for the normal
+        # Gemini Developer API path, while allowing an approved API gateway or
+        # proxy endpoint to use the same provider abstraction as OpenAI and
+        # Anthropic.
+        client_params: Dict[str, Any] = {"api_key": api_key}
+        http_options: Dict[str, Any] = {}
+        if base_url:
+            http_options["base_url"] = base_url
+        if extra_headers:
+            http_options["headers"] = extra_headers
+        if http_options:
+            client_params["http_options"] = types.HttpOptions(**http_options)
+        self._client = genai.Client(**client_params)
 
     @property
     def provider_type(self) -> str:
@@ -222,6 +255,35 @@ class GoogleProvider(BaseProvider):
         )
 
     @staticmethod
+    def _build_config(
+        *,
+        max_tokens: int,
+        system: Optional[str],
+        temperature: Optional[float],
+        tools: Optional[List[Dict[str, Any]]],
+        tool_choice: Optional[str],
+        options: Dict[str, Any],
+    ) -> types.GenerateContentConfig:
+        """Build a Gemini request config from the unified API arguments.
+
+        The public gateway deliberately has a small common surface.  Gemini
+        capabilities which have no OpenAI equivalent (for example
+        ``thinking_config``, ``response_mime_type`` or ``top_p``) are still
+        useful and are passed through unchanged via ``**kwargs``.
+        """
+        config_params: Dict[str, Any] = dict(options)
+        config_params["max_output_tokens"] = max_tokens
+        if system is not None:
+            config_params["system_instruction"] = system
+        if temperature is not None:
+            config_params["temperature"] = temperature
+        if tools is not None:
+            config_params["tools"] = GoogleProvider._convert_tools(tools)
+        if tool_choice is not None:
+            config_params["tool_config"] = GoogleProvider._convert_tool_choice(tool_choice)
+        return types.GenerateContentConfig(**config_params)
+
+    @staticmethod
     def _extract_usage(usage_meta) -> TokenUsage:
         """从 usage_metadata 提取 TokenUsage。"""
         if not usage_meta:
@@ -264,16 +326,14 @@ class GoogleProvider(BaseProvider):
     ) -> ChatResponse:
         system, contents = self._convert_messages(messages)
 
-        config_params: Dict[str, Any] = {"max_output_tokens": max_tokens}
-        if system is not None:
-            config_params["system_instruction"] = system
-        if temperature is not None:
-            config_params["temperature"] = temperature
-        if tools is not None:
-            config_params["tools"] = self._convert_tools(tools)
-        if tool_choice is not None:
-            config_params["tool_config"] = self._convert_tool_choice(tool_choice)
-        config = types.GenerateContentConfig(**config_params)
+        config = self._build_config(
+            max_tokens=max_tokens,
+            system=system,
+            temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice,
+            options=kwargs,
+        )
 
         coro = self._client.aio.models.generate_content(
             model=model, contents=contents, config=config,
@@ -343,16 +403,14 @@ class GoogleProvider(BaseProvider):
     ) -> AsyncIterator[StreamChunk]:
         system, contents = self._convert_messages(messages)
 
-        config_params: Dict[str, Any] = {"max_output_tokens": max_tokens}
-        if system is not None:
-            config_params["system_instruction"] = system
-        if temperature is not None:
-            config_params["temperature"] = temperature
-        if tools is not None:
-            config_params["tools"] = self._convert_tools(tools)
-        if tool_choice is not None:
-            config_params["tool_config"] = self._convert_tool_choice(tool_choice)
-        config = types.GenerateContentConfig(**config_params)
+        config = self._build_config(
+            max_tokens=max_tokens,
+            system=system,
+            temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice,
+            options=kwargs,
+        )
 
         coro = self._client.aio.models.generate_content_stream(
             model=model, contents=contents, config=config,
@@ -374,12 +432,31 @@ class GoogleProvider(BaseProvider):
                 continue
 
             candidate = chunk.candidates[0]
+            usage = self._extract_usage(chunk.usage_metadata)
+
+            # Gemini can send a terminal chunk with a finish reason but no
+            # content parts.  Emit it before handling content so callers do
+            # not miss ``length``/``content_filter`` completion states.
+            if candidate.finish_reason:
+                yield StreamChunk(
+                    content="",
+                    finish_reason=self._map_finish_reason(candidate),
+                    usage=usage if usage.total_tokens > 0 else None,
+                    raw=chunk,
+                )
+
             if not candidate.content or not candidate.content.parts:
                 continue
 
             for part in candidate.content.parts:
                 if part.text:
-                    yield StreamChunk(content=part.text, raw=chunk)
+                    is_thinking = bool(getattr(part, "thought", False))
+                    yield StreamChunk(
+                        content=part.text,
+                        thinking=is_thinking,
+                        reasoning_content=part.text if is_thinking else "",
+                        raw=chunk,
+                    )
 
                 if part.function_call:
                     fc = part.function_call
@@ -400,16 +477,49 @@ class GoogleProvider(BaseProvider):
                         raw=chunk,
                     )
 
-            # finish_reason + usage
-            if candidate.finish_reason:
-                finish = self._map_finish_reason(candidate)
-                usage = self._extract_usage(chunk.usage_metadata)
-                yield StreamChunk(
-                    content="",
-                    finish_reason=finish,
-                    usage=usage if usage.total_tokens > 0 else None,
-                    raw=chunk,
-                )
+
+class VertexAIProvider(GoogleProvider):
+    """Vertex AI Gemini adapter using the official Google Gen AI SDK.
+
+    Standard Vertex deployments authenticate with Application Default
+    Credentials (ADC). Vertex AI Express may instead supply an API key.
+    """
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> None:
+        import os
+
+        client_params: Dict[str, Any] = {"vertexai": True}
+        if api_key:
+            client_params["api_key"] = api_key
+
+        # Vertex Express API keys use the global endpoint and do not need a
+        # project/location. Standard Vertex uses ADC plus these variables.
+        if not api_key:
+            project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+            location = os.environ.get("GOOGLE_CLOUD_LOCATION")
+            if project:
+                client_params["project"] = project
+            if location:
+                client_params["location"] = location
+
+        # Vertex uses the stable API. The SDK determines its regional endpoint
+        # from project/location; base_url is only for an approved custom proxy.
+        http_options: Dict[str, Any] = {"api_version": "v1"}
+        if base_url:
+            http_options["base_url"] = base_url
+        if extra_headers:
+            http_options["headers"] = extra_headers
+        client_params["http_options"] = types.HttpOptions(**http_options)
+        self._client = genai.Client(**client_params)
+
+    @property
+    def provider_type(self) -> str:
+        return "vertexai"
 
 
 @register_provider("google")
@@ -417,3 +527,10 @@ def _create_google(
     api_key: str, base_url: str, extra_headers: dict | None = None,
 ) -> GoogleProvider:
     return GoogleProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)
+
+
+@register_provider("vertexai")
+def _create_vertexai(
+    api_key: str, base_url: str, extra_headers: dict | None = None,
+) -> VertexAIProvider:
+    return VertexAIProvider(api_key=api_key, base_url=base_url, extra_headers=extra_headers)

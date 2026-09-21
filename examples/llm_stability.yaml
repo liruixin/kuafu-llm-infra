@@ -28,6 +28,14 @@ llm_stability:
         openai:
           base_url: "https://ark.cn-beijing.volces.com/api/v3"
 
+    google-ai:
+      api_key: "${GEMINI_API_KEY}"
+      endpoints:
+        # Official Gemini SDK protocol. Leave base_url empty for the
+        # Gemini Developer API; set it only when using an approved gateway.
+        google:
+          base_url: ""
+
   # === Model definitions (model is the first-class citizen) ===
   # Key = official/canonical model ID
   # Each provider entry specifies the endpoint type and actual model_id.
@@ -67,6 +75,13 @@ llm_stability:
           endpoint: openai
           model_id: "deepseek-chat"      # ppio uses "deepseek-chat"
           priority: 2
+          probe: true
+
+    gemini-2.5-flash:
+      providers:
+        - provider: google-ai
+          endpoint: google
+          priority: 1
           probe: true
 
   # === Business key strategies ===
