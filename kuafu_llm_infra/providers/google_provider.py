@@ -115,6 +115,32 @@ class GoogleProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _text_content(content: Any) -> str:
+        """Normalize OpenAI text content into Gemini's string-only Part.text.
+
+        AgentWorld may send a normal text turn as an OpenAI content-block
+        list, e.g. ``[{"type": "text", "text": "hello"}]``. Gemini's
+        ``Part.text`` accepts a string only, so preserve text blocks and
+        ignore non-text blocks that this provider cannot represent.
+        """
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content)
+
+        text_parts: List[str] = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+        return "\n".join(text_parts)
+
+    @staticmethod
     def _convert_messages(
         messages: List[Dict[str, Any]],
     ) -> tuple[Optional[str], List[types.Content]]:
@@ -143,19 +169,19 @@ class GoogleProvider(BaseProvider):
             role = msg.get("role", "")
 
             if role == "system":
-                system_parts.append(msg.get("content", ""))
+                system_parts.append(GoogleProvider._text_content(msg.get("content")))
                 i += 1
 
             elif role == "user":
                 contents.append(types.Content(
                     role="user",
-                    parts=[types.Part(text=msg.get("content", ""))],
+                    parts=[types.Part(text=GoogleProvider._text_content(msg.get("content")))],
                 ))
                 i += 1
 
             elif role == "assistant":
                 parts: List[types.Part] = []
-                content = msg.get("content")
+                content = GoogleProvider._text_content(msg.get("content"))
                 if content:
                     parts.append(types.Part(text=content))
 
