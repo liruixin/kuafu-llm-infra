@@ -124,6 +124,7 @@ class OpenAIProvider(BaseProvider):
                         name=tc.function.name or "",
                         arguments=tc.function.arguments or "",
                     ),
+                    extra_content=getattr(tc, "extra_content", None),
                 )
                 for tc in choice.message.tool_calls
             ]
@@ -265,6 +266,7 @@ class OpenAIProvider(BaseProvider):
                             arguments=tc.function.arguments if tc.function and tc.function.arguments else "",
                         ),
                         index=tc.index,
+                        extra_content=getattr(tc, "extra_content", None),
                     )
                     for tc in delta.tool_calls
                 ]

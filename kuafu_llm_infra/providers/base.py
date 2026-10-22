@@ -45,6 +45,10 @@ class ToolCall:
     # Gemini thinking models only — 对其他 provider 永远为 None。业务侧回传消息时
     # 只要把它原样放回 tool_call dict 的顶层 key，Google provider 会自动回填到 Part。
     thought_signature: Optional[bytes] = None
+    # Gemini OpenAI-compatible 端点（谷歌中转）把 thought_signature 包在
+    # tool_call 的 extra_content.google.thought_signature 里。这里原样保存整个
+    # extra_content dict，业务侧回传时把它原样放回 tool_call dict 即可。
+    extra_content: Optional[Dict[str, Any]] = None
 
 
 @dataclass
